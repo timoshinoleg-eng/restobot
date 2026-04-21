@@ -1,0 +1,95 @@
+# RestoBot — Restaurant Telegram Bot SaaS
+# Python 3.11+, Yandex Cloud, YandexGPT, 152-ФЗ compliant
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "restobot"
+version = "1.0.0"
+description = "AI-powered restaurant bot for Telegram and Max"
+authors = ["RestoBot Team <team@restobot.ru>"]
+readme = "README.md"
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Web framework
+fastapi = "^0.110.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+
+# Telegram bot
+aiogram = "^3.4.0"
+
+# Database
+sqlalchemy = "^2.0.0"
+asyncpg = "^0.29.0"
+alembic = "^1.13.0"
+pgvector = "^0.2.0"  # For vector operations
+
+# AI / LLM
+httpx = "^0.27.0"
+aiohttp = "^3.9.0"
+
+# Payments
+yookassa = "^3.0.0"
+
+# Cache / Queue
+redis = "^5.0.0"
+
+# Configuration
+pydantic = "^2.6.0"
+pydantic-settings = "^2.2.0"
+
+# Logging / Monitoring
+structlog = "^24.1.0"
+prometheus-client = "^0.20.0"
+
+# Testing
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+pytest-cov = "^4.1.0"
+httpx = "^0.27.0"  # For test client
+
+# Utils
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.0"}
+python-multipart = "^0.0.9"
+aiofiles = "^23.2.0"
+phonenumbers = "^8.13.0"
+jinja2 = "^3.1.0"
+pyyaml = "^6.0.1"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0.0"
+isort = "^5.13.0"
+flake8 = "^7.0.0"
+mypy = "^1.8.0"
+pre-commit = "^3.6.0"
+
+[tool.poetry.scripts]
+restobot-bot = "bot.main:main"
+restobot-api = "api.main:main"
+restobot-ai = "ai.main:main"
+restobot-worker = "payments.worker:main"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=restobot --cov-report=term-missing"
