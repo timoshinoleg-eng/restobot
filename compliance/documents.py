@@ -4,14 +4,15 @@
 import hashlib
 from datetime import datetime
 from string import Template
-from typing import Optional
+from typing import Any
 
 from shared.config import get_settings
 
 settings = get_settings()
 
 
-PRIVACY_POLICY_TEMPLATE = Template("""
+PRIVACY_POLICY_TEMPLATE = Template(
+    """
 ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ
 
 1. Оператор персональных данных:
@@ -61,10 +62,11 @@ PRIVACY_POLICY_TEMPLATE = Template("""
 
 Дата: $generated_at
 Версия: $version
-""")
+"""
+)
 
 
-def generate_privacy_policy(tenant: dict) -> str:
+def generate_privacy_policy(tenant: dict[str, Any]) -> str:
     """Auto-generate privacy policy for tenant."""
     return PRIVACY_POLICY_TEMPLATE.substitute(
         company_name=tenant.get("name", "[НАЗВАНИЕ]"),
@@ -75,7 +77,7 @@ def generate_privacy_policy(tenant: dict) -> str:
         phone=tenant.get("phone", "[УКАЖИТЕ ТЕЛЕФОН]"),
         contact_info=f"Email: {tenant.get('email', '[УКАЖИТЕ]')}",
         generated_at=datetime.now().isoformat(),
-        version="1.0"
+        version="1.0",
     )
 
 
@@ -108,7 +110,7 @@ def hash_consent(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def generate_rkn_notification_json(tenant: dict) -> dict:
+def generate_rkn_notification_json(tenant: dict[str, Any]) -> dict[str, Any]:
     """Generate JSON for RKN notification (rkn.gov.ru)."""
     return {
         "operator": {
@@ -117,17 +119,17 @@ def generate_rkn_notification_json(tenant: dict) -> dict:
             "ogrn": tenant.get("ogrn", ""),
             "address": tenant.get("legal_address", ""),
             "email": tenant.get("email", ""),
-            "phone": tenant.get("phone", "")
+            "phone": tenant.get("phone", ""),
         },
         "dpo": {
             "name": tenant.get("dpo_name", "[УКАЖИТЕ]"),
-            "email": tenant.get("dpo_email", "[УКАЖИТЕ]")
+            "email": tenant.get("dpo_email", "[УКАЖИТЕ]"),
         },
         "processing": {
             "purposes": ["order_processing", "delivery", "loyalty"],
             "data_categories": ["full_name", "phone", "address", "email"],
             "cross_border": False,
-            "servers_location": "Russian Federation"
+            "servers_location": "Russian Federation",
         },
-        "generated_at": datetime.now().isoformat()
+        "generated_at": datetime.now().isoformat(),
     }
