@@ -287,6 +287,11 @@ class PaymentWorker:
         logger.info("Payment worker stopped")
 
 
+async def send_order_status_update(order_id: int, status: str) -> None:
+    """Stub for sending order status update notifications."""
+    logger.info("Order %s status updated to %s", order_id, status)
+
+
 def main() -> None:
     """Entry point with graceful shutdown."""
     worker = PaymentWorker()

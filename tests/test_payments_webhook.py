@@ -34,10 +34,11 @@ class TestPaymentWebhook:
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch("payments.worker.get_raw_pool", return_value=mock_pool):
-            await worker.handle_webhook(
-                "tenant_test",
-                {"object": {"id": "pay_123"}, "event": "payment.succeeded"},
-            )
+            with patch("payments.worker.send_order_status_update", new_callable=AsyncMock):
+                await worker.handle_webhook(
+                    "tenant_test",
+                    {"object": {"id": "pay_123"}, "event": "payment.succeeded"},
+                )
 
         assert mock_conn.execute.await_count == 2  # nosec B101
 
@@ -60,9 +61,10 @@ class TestPaymentWebhook:
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with patch("payments.worker.get_raw_pool", return_value=mock_pool):
-            await worker.handle_webhook(
-                "tenant_test",
-                {"object": {"id": "pay_123"}, "event": "payment.canceled"},
-            )
+            with patch("payments.worker.send_order_status_update", new_callable=AsyncMock):
+                await worker.handle_webhook(
+                    "tenant_test",
+                    {"object": {"id": "pay_123"}, "event": "payment.canceled"},
+                )
 
         assert mock_conn.execute.await_count == 2  # nosec B101

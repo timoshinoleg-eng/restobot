@@ -21,6 +21,9 @@ from aiogram.types import (
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
+import redis.asyncio as redis
+from aiogram.fsm.storage.redis import RedisStorage
+
 from shared.config import get_settings
 from shared.database import close_raw_pool, init_database
 from shared.rate_limiter import RateLimiter
@@ -33,7 +36,16 @@ bot = Bot(
     token=settings.TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
 )
-dp = Dispatcher()
+_redis_client = redis.from_url(
+    str(settings.REDIS_URL),
+    decode_responses=True,  # type: ignore[no-untyped-call]
+)
+storage = RedisStorage(
+    redis=_redis_client,
+    state_ttl=3600,
+    data_ttl=3600,
+)
+dp = Dispatcher(storage=storage)
 router = Router()
 rate_limiter = RateLimiter(limit=5, window=60)
 

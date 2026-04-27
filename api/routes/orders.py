@@ -1,12 +1,13 @@
 # api/routes/orders.py
 """Order management endpoints."""
 
+import json
 import logging
 import secrets
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from shared.config import get_settings
@@ -25,6 +26,17 @@ class OrderItemRequest(BaseModel):
     quantity: int = Field(default=1, ge=1, le=100)
     modifiers: Optional[list[dict[str, Any]]] = None
     price: float = Field(..., gt=0)
+
+    @field_validator("modifiers")
+    @classmethod
+    def validate_modifiers(
+        cls, v: Optional[list[dict[str, Any]]]
+    ) -> Optional[list[dict[str, Any]]]:
+        if v:
+            for mod in v:
+                if "modifier_option_id" not in mod:
+                    raise ValueError("Modifier missing modifier_option_id")
+        return v
 
 
 class OrderCreateRequest(BaseModel):
@@ -71,8 +83,48 @@ class OrderResponse(BaseModel):
     created_at: str
 
 
+async def _reserve_ingredients(
+    conn: Any, tenant_schema: str, items: list[OrderItemRequest]
+) -> None:
+    """Reserve ingredients for order items; raise 422 if insufficient stock."""
+    for item in items:
+        recipe = await conn.fetch(
+            format_sql(
+                "SELECT ingredient_id, grams_needed FROM {}.recipes WHERE menu_item_id = $1",
+                tenant_schema,
+            ),
+            item.menu_item_id,
+        )
+        if not recipe:
+            continue
+        for ing in recipe:
+            needed = float(ing["grams_needed"]) * item.quantity
+            stock = await conn.fetchrow(
+                format_sql(
+                    "SELECT current_stock as available FROM {}.ingredients WHERE id = $1",
+                    tenant_schema,
+                ),
+                ing["ingredient_id"],
+            )
+            if not stock or float(stock["available"]) < needed:
+                raise HTTPException(status_code=422, detail="Insufficient stock")
+            await conn.fetchrow(
+                format_sql(
+                    """
+                    UPDATE {}.ingredients
+                    SET current_stock = current_stock - $1
+                    WHERE id = $2
+                    RETURNING current_stock
+                    """,
+                    tenant_schema,
+                ),
+                needed,
+                ing["ingredient_id"],
+            )
+
+
 @router.post("/orders", response_model=OrderResponse, status_code=201)
-async def create_order(request: Request, body: OrderCreateRequest) -> dict[str, Any]:
+async def create_order(request: Request, body: OrderCreateRequest) -> Any:
     """Create a new order with transactional safety."""
     tenant_schema: str = request.state.tenant_schema
     pool = await get_raw_pool()
@@ -84,6 +136,71 @@ async def create_order(request: Request, body: OrderCreateRequest) -> dict[str, 
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # Idempotency check
+            idempotency_key = request.headers.get("Idempotency-Key")
+            if idempotency_key:
+                existing = await conn.fetchrow(
+                    format_sql(
+                        "SELECT * FROM {}.orders WHERE idempotency_key = $1",
+                        tenant_schema,
+                    ),
+                    idempotency_key,
+                )
+                if existing:
+                    items_json = existing["items_json"]
+                    if isinstance(items_json, str):
+                        items_json = json.loads(items_json)
+                    for it in items_json:
+                        if "modifiers" not in it:
+                            it["modifiers"] = None
+                    created_at = existing["created_at"]
+                    if hasattr(created_at, "isoformat"):
+                        created_at = created_at.isoformat()
+                    else:
+                        created_at = str(created_at)
+                    return Response(
+                        status_code=200,
+                        content=__import__("json").dumps({
+                            "id": existing["id"],
+                            "order_number": existing["order_number"],
+                            "status": existing["status"],
+                            "payment_status": existing["payment_status"],
+                            "amount": float(existing["amount"]),
+                            "items": items_json,
+                            "created_at": created_at,
+                        }),
+                        media_type="application/json",
+                    )
+
+            # Validate prices and modifiers
+            for item in body.items:
+                menu_item = await conn.fetchrow(
+                    format_sql(
+                        "SELECT price FROM {}.menu_items WHERE id = $1",
+                        tenant_schema,
+                    ),
+                    item.menu_item_id,
+                )
+                if not menu_item:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Menu item {item.menu_item_id} not found",
+                    )
+                expected_price = float(menu_item["price"])
+                if item.modifiers:
+                    for mod in item.modifiers:
+                        option = await conn.fetchrow(
+                            format_sql(
+                                "SELECT price FROM {}.modifier_options WHERE id = $1",
+                                tenant_schema,
+                            ),
+                            mod["modifier_option_id"],
+                        )
+                        if option:
+                            expected_price += float(option["price"])
+                if abs(expected_price - item.price) > 0.01:
+                    raise HTTPException(status_code=422, detail="Price mismatch")
+
             # Validate minimum order amount
             settings_row = await conn.fetchrow(
                 format_sql(
@@ -96,6 +213,9 @@ async def create_order(request: Request, body: OrderCreateRequest) -> dict[str, 
                     status_code=422,
                     detail=f"Minimum order amount: {settings_row['min_order_amount']} ₽",
                 )
+
+            # Reserve ingredients / check stock
+            await _reserve_ingredients(conn, tenant_schema, body.items)
 
             # Apply loyalty points with row-level lock
             if body.loyalty_points_to_use and body.loyalty_points_to_use > 0:

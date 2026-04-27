@@ -8,9 +8,10 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import bookings, loyalty, menu, orders, payments, users
+from api.routes import bookings, dashboard, loyalty, menu, orders, payments, users
 from shared.config import get_settings
 from shared.database import check_database_health, close_raw_pool, init_database
+from shared.jwt_utils import verify_access_token
 
 settings = get_settings()
 
@@ -58,6 +59,25 @@ async def security_headers_middleware(
     )
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
+# ─── Auth Middleware ───────────────────────────────────────────────
+
+
+@app.middleware("http")
+async def auth_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Verify JWT and set user context."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        payload = verify_access_token(token)
+        if payload:
+            request.state.user_id = payload.user_id
+            request.state.user_role = payload.role
+    response = await call_next(request)
     return response
 
 
@@ -122,6 +142,7 @@ app.include_router(payments.router, prefix="/api/v1/{tenant}", tags=["Payments"]
 app.include_router(users.router, prefix="/api/v1/{tenant}", tags=["Users"])
 app.include_router(loyalty.router, prefix="/api/v1/{tenant}", tags=["Loyalty"])
 app.include_router(bookings.router, prefix="/api/v1/{tenant}", tags=["Bookings"])
+app.include_router(dashboard.router, prefix="/api/v1/{tenant}", tags=["Dashboard"])
 
 
 if __name__ == "__main__":

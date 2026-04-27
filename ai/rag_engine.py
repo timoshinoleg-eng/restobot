@@ -85,7 +85,10 @@ class YandexGPTClient:
         )
         resp.raise_for_status()
         data: dict[str, Any] = resp.json()
-        self.iam_token = data["access_token"]
+        token = data.get("access_token")
+        if not isinstance(token, str):
+            raise RuntimeError("Invalid IAM token response from metadata service")
+        self.iam_token = token
         expires_in = data.get("expires_in", 3600)
         self.token_expires = time.time() + expires_in - 300
         return self.iam_token

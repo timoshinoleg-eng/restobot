@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: str
     YOOKASSA_RETURN_URL: str = "https://t.me/restobot_bot"
     YOOKASSA_TIMEOUT: float = 10.0
+    YOOKASSA_WEBHOOK_SECRET: Optional[str] = None
 
     # ─── Compliance ──────────────────────────────────────────────────
     COMPLIANCE_CONSENT_VERSION: int = 1
