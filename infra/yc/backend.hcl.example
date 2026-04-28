@@ -1,0 +1,12 @@
+endpoints = {
+  s3 = "https://storage.yandexcloud.net"
+}
+
+bucket = "replace-with-tfstate-bucket-name"
+region = "ru-central1"
+key    = "restobot/mvp/terraform.tfstate"
+
+skip_region_validation      = true
+skip_credentials_validation = true
+skip_requesting_account_id  = true
+skip_s3_checksum            = true

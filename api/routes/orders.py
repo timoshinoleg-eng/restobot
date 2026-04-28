@@ -291,7 +291,7 @@ async def create_order(request: Request, body: OrderCreateRequest) -> Any:
                         VALUES (
                             $1, $2, 'spend', $3,
                             (SELECT loyalty_points FROM {}.users WHERE id = $1),
-                            'Order #{4}'
+                            $4
                         )
                         """,
                         tenant_schema,
@@ -300,7 +300,7 @@ async def create_order(request: Request, body: OrderCreateRequest) -> Any:
                     body.user_id,
                     order_id,
                     -body.loyalty_points_to_use,
-                    order_number,
+                    f"Order #{order_number}",
                 )
 
     return {

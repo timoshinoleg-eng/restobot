@@ -1,0 +1,24 @@
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir poetry==1.7.1
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --only main
+
+COPY . .
+
+ENV ENVIRONMENT=production
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD sh -c "curl -f http://localhost:${PORT:-8000}/health || exit 1"
+
+CMD ["sh", "-c", "uvicorn apps.admin_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

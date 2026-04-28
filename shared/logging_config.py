@@ -1,42 +1,55 @@
-# shared/logging_config.py
-"""Structured logging configuration using structlog."""
+"""JSON logging helpers with request-id propagation."""
 
+import json
 import logging
 import sys
-
-import structlog
+from contextvars import ContextVar, Token
 
 from shared.config import get_settings
 
 settings = get_settings()
+request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
+
+try:
+    from pythonjsonlogger import jsonlogger
+except ImportError:  # pragma: no cover - fallback for partially provisioned local envs
+    jsonlogger = None
+
+
+class RequestIdFilter(logging.Filter):
+    """Inject the current request id into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_context.get("-")
+        return True
+
+
+def set_request_id(value: str) -> Token[str]:
+    """Store request id in context variables."""
+    return request_id_context.set(value)
+
+
+def reset_request_id(token: Token[str]) -> None:
+    """Reset request id context."""
+    request_id_context.reset(token)
 
 
 def configure_logging() -> None:
-    """Configure structured JSON or text logging for all services."""
-    shared_processors: list[structlog.types.Processor] = [
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.stdlib.ExtraAdder(),
-    ]
-
-    if settings.LOG_FORMAT == "json":
-        formatter = structlog.stdlib.ProcessorFormatter(
-            foreign_pre_chain=shared_processors,
-            processors=[
-                structlog.processors.dict_tracebacks,
-                structlog.processors.JSONRenderer(),
-            ],
-        )
-    else:
-        formatter = structlog.stdlib.ProcessorFormatter(
-            foreign_pre_chain=shared_processors,
-            processors=[
-                structlog.dev.ConsoleRenderer(),
-            ],
-        )
-
+    """Configure root logging for apps and workers."""
     handler = logging.StreamHandler(sys.stdout)
+    handler.addFilter(RequestIdFilter())
+
+    if settings.LOG_FORMAT == "json" and jsonlogger is not None:
+        formatter: logging.Formatter = jsonlogger.JsonFormatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s"
+        )
+    elif settings.LOG_FORMAT == "json":
+        formatter = _FallbackJsonFormatter()
+    else:
+        formatter = logging.Formatter(
+            "%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s"
+        )
+
     handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
@@ -44,17 +57,22 @@ def configure_logging() -> None:
     root_logger.addHandler(handler)
     root_logger.setLevel(settings.LOG_LEVEL)
 
-    structlog.configure(
-        processors=shared_processors
-        + [
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "asyncpg"):
+        logging.getLogger(logger_name).handlers = [handler]
+        logging.getLogger(logger_name).setLevel(settings.LOG_LEVEL)
+
+
+class _FallbackJsonFormatter(logging.Formatter):
+    """Minimal JSON formatter used when python-json-logger is not installed yet."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "asctime": self.formatTime(record, self.datefmt),
+            "levelname": record.levelname,
+            "name": record.name,
+            "message": record.getMessage(),
+            "request_id": getattr(record, "request_id", "-"),
+        }
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=True)

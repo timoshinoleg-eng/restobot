@@ -1,0 +1,179 @@
+name: Deploy to Yandex Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+  TERRAFORM_DIR: "infra/yc"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: restobot
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: restobot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restobot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    env:
+      YC_CLOUD_ID: ${{ secrets.YC_CLOUD_ID }}
+      YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
+      TF_VAR_yc_cloud_id: ${{ secrets.YC_CLOUD_ID }}
+      TF_VAR_yc_folder_id: ${{ secrets.YC_FOLDER_ID }}
+      TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+      TF_VAR_redis_password: ${{ secrets.TF_VAR_REDIS_PASSWORD }}
+      TF_VAR_jwt_secret: ${{ secrets.TF_VAR_JWT_SECRET }}
+      TF_VAR_telegram_token: ${{ secrets.TF_VAR_TELEGRAM_TOKEN }}
+      TF_VAR_yokassa_shop_id: ${{ secrets.TF_VAR_YOKASSA_SHOP_ID }}
+      TF_VAR_yokassa_secret_key: ${{ secrets.TF_VAR_YOKASSA_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Install YC CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash -s -- -i "$HOME/yandex-cloud" -n
+          echo "$HOME/yandex-cloud/bin" >> "$GITHUB_PATH"
+
+      - name: Configure YC CLI
+        run: |
+          printf '%s' '${{ secrets.YC_SA_JSON_KEY }}' > "$RUNNER_TEMP/key.json"
+          yc config profile create ci || true
+          yc config profile activate ci
+          yc config set service-account-key "$RUNNER_TEMP/key.json"
+          yc config set cloud-id "$YC_CLOUD_ID"
+          yc config set folder-id "$YC_FOLDER_ID"
+
+      - name: Install Python dependencies
+        run: |
+          pip install poetry==1.7.1
+          poetry install --no-interaction --no-root
+
+      - name: Ruff
+        run: poetry run ruff check .
+
+      - name: Unit tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://restobot:password@localhost:5432/restobot
+          REDIS_URL: redis://localhost:6379/0
+          TELEGRAM_BOT_TOKEN: test_bot_token
+          YC_FOLDER_ID: test-folder
+          YOOKASSA_SHOP_ID: test-shop
+          YOOKASSA_SECRET_KEY: test-secret
+          JWT_SECRET: test_secret_key_min_32_chars_here
+          YC_OBJECT_STORAGE_BUCKET: test-bucket
+        run: poetry run pytest -m "not cloud" -q
+
+      - name: Terraform init
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform init
+
+      - name: Bootstrap infra without containers
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -target=yandex_container_repository.admin \
+            -target=yandex_container_repository.public \
+            -target=yandex_container_repository.migration \
+            -target=yandex_mdb_postgresql_database.restobot \
+            -target=yandex_mdb_redis_cluster.restobot \
+            -target=yandex_lockbox_secret_version.common \
+            -target=yandex_lockbox_secret_version.db \
+            -target=yandex_lockbox_secret_version.redis
+
+      - name: Resolve registry and image tags
+        id: image_meta
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          REGISTRY_ID="$(terraform output -raw registry_id)"
+          echo "registry_id=$REGISTRY_ID" >> "$GITHUB_OUTPUT"
+          echo "admin_image=cr.yandex/$REGISTRY_ID/restobot-admin:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "public_image=cr.yandex/$REGISTRY_ID/restobot-public:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "migration_image=cr.yandex/$REGISTRY_ID/restobot-migrate:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "admin_latest=cr.yandex/$REGISTRY_ID/restobot-admin:latest" >> "$GITHUB_OUTPUT"
+          echo "public_latest=cr.yandex/$REGISTRY_ID/restobot-public:latest" >> "$GITHUB_OUTPUT"
+          echo "migration_latest=cr.yandex/$REGISTRY_ID/restobot-migrate:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Docker for YC Container Registry
+        run: yc container registry configure-docker
+
+      - name: Build admin image
+        run: |
+          docker build -f docker/Dockerfile.admin -t "${{ steps.image_meta.outputs.admin_image }}" -t "${{ steps.image_meta.outputs.admin_latest }}" .
+
+      - name: Build public image
+        run: |
+          docker build -f docker/Dockerfile.public -t "${{ steps.image_meta.outputs.public_image }}" -t "${{ steps.image_meta.outputs.public_latest }}" .
+
+      - name: Tag migration image
+        run: |
+          docker tag "${{ steps.image_meta.outputs.admin_image }}" "${{ steps.image_meta.outputs.migration_image }}"
+          docker tag "${{ steps.image_meta.outputs.admin_image }}" "${{ steps.image_meta.outputs.migration_latest }}"
+
+      - name: Push images
+        run: |
+          docker push "${{ steps.image_meta.outputs.admin_image }}"
+          docker push "${{ steps.image_meta.outputs.admin_latest }}"
+          docker push "${{ steps.image_meta.outputs.public_image }}"
+          docker push "${{ steps.image_meta.outputs.public_latest }}"
+          docker push "${{ steps.image_meta.outputs.migration_image }}"
+          docker push "${{ steps.image_meta.outputs.migration_latest }}"
+
+      - name: Deploy containers and gateway
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var "admin_image=${{ steps.image_meta.outputs.admin_image }}" \
+            -var "public_image=${{ steps.image_meta.outputs.public_image }}" \
+            -var "migration_image=${{ steps.image_meta.outputs.migration_image }}"
+
+      - name: Run cloud migrations
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          MIGRATION_URL="$(terraform output -raw migration_container_url)"
+          curl -fsS \
+            -D "$RUNNER_TEMP/migration-headers.txt" \
+            -o "$RUNNER_TEMP/migration-body.txt" \
+            -H "Authorization: Bearer $(yc iam create-token)" \
+            "$MIGRATION_URL"
+          if ! grep -qi '^x-task-exit-code: 0' "$RUNNER_TEMP/migration-headers.txt"; then
+            echo "Migration runner failed"
+            cat "$RUNNER_TEMP/migration-headers.txt"
+            cat "$RUNNER_TEMP/migration-body.txt"
+            exit 1
+          fi
+
+      - name: Smoke test
+        working-directory: ${{ github.workspace }}
+        run: |
+          GATEWAY_URL="$(terraform -chdir=${{ env.TERRAFORM_DIR }} output -raw gateway_url)"
+          poetry run python scripts/smoke_cloud.py --gateway-url "$GATEWAY_URL"

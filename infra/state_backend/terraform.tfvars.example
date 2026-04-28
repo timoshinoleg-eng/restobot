@@ -1,0 +1,8 @@
+yc_cloud_id               = "b1gxxxxxxxxxxxxxxxx"
+yc_folder_id              = "b1gxxxxxxxxxxxxxxxx"
+yc_token                  = null
+yc_zone                   = "ru-central1-a"
+
+tfstate_bucket_name       = "replace-with-globally-unique-restobot-tfstate-bucket"
+tfstate_service_account_name = "restobot-tfstate"
+force_destroy_bucket      = false

@@ -1,90 +1,151 @@
-# shared/config.py
 """Application configuration using pydantic-settings."""
 
 import re
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Whitelist pattern for PostgreSQL schema names (SQL injection prevention)
 SCHEMA_NAME_PATTERN: re.Pattern[str] = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables and Lockbox."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
 
-    # ─── Application ─────────────────────────────────────────────────
     APP_NAME: str = "RestoBot"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False)
-    ENV: str = Field(default="production", pattern=r"^(development|staging|production)$")
+    DEBUG: bool = False
+    ENVIRONMENT: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "ENV"),
+        pattern=r"^(development|staging|production)$",
+    )
 
-    # ─── Database ────────────────────────────────────────────────────
-    DATABASE_URL: PostgresDsn
-    DATABASE_POOL_MIN: int = 5
-    DATABASE_POOL_MAX: int = 20
+    DATABASE_URL: Optional[str] = None
+    DATABASE_HOST: Optional[str] = None
+    DATABASE_PORT: int = 6432
+    DATABASE_NAME: str = "restobot"
+    DATABASE_USER: Optional[str] = None
+    DATABASE_PASSWORD: Optional[str] = None
+    DATABASE_POOL_MIN: int = 2
+    DATABASE_POOL_MAX: int = 10
+    DATABASE_CONNECT_RETRIES: int = 5
+    DATABASE_CONNECT_RETRY_DELAY: float = 1.5
 
-    # ─── Redis ───────────────────────────────────────────────────────
-    REDIS_URL: RedisDsn = Field(default=RedisDsn("redis://localhost:6379/0"))
-    REDIS_CART_TTL: int = 1800  # 30 minutes
+    REDIS_URL: Optional[str] = None
+    REDIS_HOST: Optional[str] = None
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_CART_TTL: int = 1800
 
-    # ─── Telegram ────────────────────────────────────────────────────
-    TELEGRAM_BOT_TOKEN: str
+    TELEGRAM_BOT_TOKEN: str = Field(
+        validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "TELEGRAM_TOKEN")
+    )
     TELEGRAM_WEBHOOK_URL: Optional[str] = None
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = None
 
-    # ─── Yandex Cloud / YandexGPT ────────────────────────────────────
-    YC_FOLDER_ID: str
-    YC_IAM_TOKEN: Optional[str] = None  # If None, use metadata service inside YC VM
+    YC_CLOUD_ID: Optional[str] = None
+    YC_FOLDER_ID: Optional[str] = None
+    YC_IAM_TOKEN: Optional[str] = None
     YANDEXGPT_MODEL: str = "yandexgpt-lite"
     YANDEXGPT_PRO_MODEL: str = "yandexgpt"
     YANDEXGPT_TIMEOUT: float = 5.0
     YANDEXGPT_EMBED_TIMEOUT: float = 2.0
 
-    # ─── Payments (ЮKassa) ───────────────────────────────────────────
-    YOOKASSA_SHOP_ID: str
-    YOOKASSA_SECRET_KEY: str
+    YOOKASSA_SHOP_ID: str = Field(
+        validation_alias=AliasChoices("YOOKASSA_SHOP_ID", "YOKASSA_SHOP_ID")
+    )
+    YOOKASSA_SECRET_KEY: str = Field(
+        validation_alias=AliasChoices("YOOKASSA_SECRET_KEY", "YOKASSA_SECRET_KEY")
+    )
     YOOKASSA_RETURN_URL: str = "https://t.me/restobot_bot"
     YOOKASSA_TIMEOUT: float = 10.0
     YOOKASSA_WEBHOOK_SECRET: Optional[str] = None
 
-    # ─── Compliance ──────────────────────────────────────────────────
     COMPLIANCE_CONSENT_VERSION: int = 1
-    COMPLIANCE_DATA_RETENTION_DAYS: int = 1825  # 5 years for orders
-    COMPLIANCE_PDN_RETENTION_DAYS: int = 30  # 30 days after consent withdrawal
+    COMPLIANCE_DATA_RETENTION_DAYS: int = 1825
+    COMPLIANCE_PDN_RETENTION_DAYS: int = 30
 
-    # ─── AI / RAG ────────────────────────────────────────────────────
     AI_TOP_K_RETRIEVAL: int = 3
     AI_VECTOR_DIMENSION: int = 768
     AI_MIN_SIMILARITY: float = 0.65
     AI_FALLBACK_ENABLED: bool = True
-    AI_CACHE_TTL: int = 3600  # 1 hour
+    AI_CACHE_TTL: int = 3600
 
-    # ─── Security ────────────────────────────────────────────────────
     JWT_SECRET: str = Field(..., min_length=32)
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 60
 
-    # ─── Logging ─────────────────────────────────────────────────────
     LOG_LEVEL: str = Field(default="INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
-    LOG_FORMAT: str = "json"  # json or text
+    LOG_FORMAT: str = Field(default="json", pattern=r"^(json|text)$")
 
-    # ─── Yandex Cloud Services ───────────────────────────────────────
     YC_OBJECT_STORAGE_BUCKET: str
     YC_OBJECT_STORAGE_ENDPOINT: str = "https://storage.yandexcloud.net"
     YC_MESSAGE_QUEUE_URL: Optional[str] = None
 
+    @model_validator(mode="after")
+    def finalize_connection_urls(self) -> "Settings":
+        """Build DSNs from component parts when explicit URLs are not provided."""
+        if not self.DATABASE_URL:
+            if not (self.DATABASE_HOST and self.DATABASE_USER and self.DATABASE_PASSWORD):
+                raise ValueError(
+                    "DATABASE_URL or DATABASE_HOST/DATABASE_USER/DATABASE_PASSWORD must be set"
+                )
+            self.DATABASE_URL = (
+                "postgresql+asyncpg://"
+                f"{self.DATABASE_USER}:{self.DATABASE_PASSWORD}"
+                f"@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+            )
+
+        if not self.REDIS_URL:
+            if self.REDIS_HOST and self.REDIS_PASSWORD:
+                self.REDIS_URL = (
+                    f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/"
+                    f"{self.REDIS_DB}"
+                )
+            elif self.REDIS_HOST:
+                self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            else:
+                self.REDIS_URL = f"redis://localhost:6379/{self.REDIS_DB}"
+
+        return self
+
+    @property
+    def ENV(self) -> str:
+        """Backward-compatible alias used by older modules."""
+        return self.ENVIRONMENT
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        """Always return an async SQLAlchemy URL."""
+        assert self.DATABASE_URL is not None
+        if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+            return self.DATABASE_URL
+        if self.DATABASE_URL.startswith("postgresql://"):
+            return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return self.DATABASE_URL
+
+    @property
+    def asyncpg_database_url(self) -> str:
+        """Return a DSN suitable for asyncpg."""
+        return self.sqlalchemy_database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    @property
+    def alembic_database_url(self) -> str:
+        """Return a DSN suitable for Alembic synchronous migrations."""
+        return self.sqlalchemy_database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
     @property
     def tenant_schema_prefix(self) -> str:
-        """Prefix for tenant schemas."""
         return "tenant_"
 
     def get_tenant_schema(self, tenant_id: str) -> str:

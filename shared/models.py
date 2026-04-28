@@ -18,6 +18,7 @@ class Tenant(Base):  # type: ignore[misc]
     __table_args__ = {"schema": "shared"}
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     inn: Mapped[Optional[str]] = mapped_column(String(12))
     ogrn: Mapped[Optional[str]] = mapped_column(String(15))

@@ -1,140 +1,35 @@
-# api/main.py
-"""FastAPI application for Bot API and Admin API."""
+"""Compatibility FastAPI application for the legacy `/api/v1` surface."""
 
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import Request, Response
 
-from api.routes import bookings, dashboard, loyalty, menu, orders, payments, users
+from api.routes import bookings, dashboard, ingredients, loyalty, menu, orders, payments, users
+from shared.app_factory import create_base_app
 from shared.config import get_settings
-from shared.database import check_database_health, close_raw_pool, init_database
-from shared.jwt_utils import verify_access_token
 
 settings = get_settings()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan events."""
-    await init_database()
-    yield
-    await close_raw_pool()
-
-
-app = FastAPI(
+app = create_base_app(
     title="RestoBot API",
-    version=settings.APP_VERSION,
-    description="Restaurant bot API with 152-FZ compliance",
-    lifespan=lifespan,
+    description="Compatibility API surface for local development and automated tests.",
+    service_name="api-legacy",
 )
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://app.restobot.ru", "https://t.me"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["*"],
-)
-
-
-# ─── Security Headers Middleware ───────────────────────────────────
-
-
-@app.middleware("http")
-async def security_headers_middleware(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    """Add security headers to all responses."""
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' https://app.restobot.ru; "
-        "style-src 'self' 'unsafe-inline'"
-    )
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return response
-
-
-# ─── Auth Middleware ───────────────────────────────────────────────
-
-
-@app.middleware("http")
-async def auth_middleware(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    """Verify JWT and set user context."""
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        payload = verify_access_token(token)
-        if payload:
-            request.state.user_id = payload.user_id
-            request.state.user_role = payload.role
-    response = await call_next(request)
-    return response
-
-
-# ─── Tenant Middleware ─────────────────────────────────────────────
 
 
 @app.middleware("http")
 async def tenant_middleware(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Extract tenant ID from header and set RLS context."""
+    """Extract tenant ID from header or path and set request context."""
     tenant_id = request.headers.get("X-Tenant-ID")
+    path_params = getattr(request, "path_params", {})
+    if not tenant_id and isinstance(path_params, dict):
+        tenant_id = path_params.get("tenant")
     if tenant_id:
         request.state.tenant_id = tenant_id
         request.state.tenant_schema = settings.get_tenant_schema(tenant_id)
-    response = await call_next(request)
-    return response
+    return await call_next(request)
 
-
-# ─── Health Check ──────────────────────────────────────────────────
-
-
-@app.get("/health")
-async def health_check() -> JSONResponse:
-    """Health check endpoint with DB connectivity check."""
-    db_health = await check_database_health()
-    if db_health["status"] != "healthy":
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "status": "unhealthy",
-                "database": db_health,
-                "version": settings.APP_VERSION,
-            },
-        )
-    return JSONResponse(
-        content={
-            "status": "healthy",
-            "database": db_health,
-            "version": settings.APP_VERSION,
-        }
-    )
-
-
-# ─── Error Handlers ────────────────────────────────────────────────
-
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle generic exceptions without leaking internal details."""
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"code": "INTERNAL_ERROR", "message": "Internal server error"},
-    )
-
-
-# ─── Include Routers ───────────────────────────────────────────────
 
 app.include_router(menu.router, prefix="/api/v1/{tenant}", tags=["Menu"])
 app.include_router(orders.router, prefix="/api/v1/{tenant}", tags=["Orders"])
@@ -143,6 +38,7 @@ app.include_router(users.router, prefix="/api/v1/{tenant}", tags=["Users"])
 app.include_router(loyalty.router, prefix="/api/v1/{tenant}", tags=["Loyalty"])
 app.include_router(bookings.router, prefix="/api/v1/{tenant}", tags=["Bookings"])
 app.include_router(dashboard.router, prefix="/api/v1/{tenant}", tags=["Dashboard"])
+app.include_router(ingredients.router, prefix="/api/v1/{tenant}", tags=["Ingredients"])
 
 
 if __name__ == "__main__":

@@ -30,6 +30,11 @@ ENV/
 .env
 .env.local
 .env.production
+infra/yc/backend.hcl
+infra/yc/terraform.tfvars
+infra/state_backend/terraform.tfvars
+infra/state_backend/terraform.tfstate
+infra/state_backend/terraform.tfstate.backup
 
 # IDE
 .vscode/
@@ -61,3 +66,9 @@ Thumbs.db
 
 # Poetry
 poetry.lock
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
