@@ -44,6 +44,18 @@ AsyncSessionLocal = async_sessionmaker(
 _raw_pool: Optional[asyncpg.Pool] = None
 
 
+def _shared_tables() -> list[Any]:
+    """Return tables that belong to the shared schema."""
+
+    return [table for table in Base.metadata.tables.values() if table.schema == "shared"]
+
+
+def _tenant_tables() -> list[Any]:
+    """Return tables that rely on request-level search_path."""
+
+    return [table for table in Base.metadata.tables.values() if table.schema is None]
+
+
 async def _create_raw_pool_with_retry(retries: int = 3, delay: float = 2.0) -> asyncpg.Pool:
     """Create raw asyncpg pool with connection retry and backoff."""
     last_exception: Optional[Exception] = None
@@ -108,13 +120,21 @@ async def set_tenant_rls(conn: asyncpg.Connection, tenant_id: str) -> None:
 
 async def init_database() -> None:
     """Initialize database: create shared schema, extensions."""
+    from backend.bootstrap.shared_seed import seed_shared_data
+
     async with engine.begin() as conn:
         # Enable pgvector extension
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Create shared schema
         await conn.execute(text("CREATE SCHEMA IF NOT EXISTS shared"))
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
+        # Only create shared-schema tables at startup. Tenant-scoped tables are
+        # created per schema during onboarding/migrations.
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=_shared_tables()))
+
+    async with AsyncSessionLocal() as session:
+        await session.begin()
+        await seed_shared_data(session)
+        await session.commit()
 
     # Initialize raw pool
     await get_raw_pool()

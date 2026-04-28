@@ -79,6 +79,48 @@ services:
       timeout: 5s
       retries: 3
 
+  admin_api:
+    build: .
+    command: python -m apps.admin_api.main
+    ports:
+      - "8010:8010"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://restobot:${POSTGRES_PASSWORD:-changeme}@postgres:5432/restobot
+      - REDIS_URL=redis://redis:6379/0
+      - YC_FOLDER_ID=${YC_FOLDER_ID}
+      - YC_IAM_TOKEN=${YC_IAM_TOKEN}
+      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
+      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - YC_OBJECT_STORAGE_BUCKET=${YC_OBJECT_STORAGE_BUCKET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  public_api:
+    build: .
+    command: python -m apps.public_api.main
+    ports:
+      - "8011:8011"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://restobot:${POSTGRES_PASSWORD:-changeme}@postgres:5432/restobot
+      - REDIS_URL=redis://redis:6379/0
+      - YC_FOLDER_ID=${YC_FOLDER_ID}
+      - YC_IAM_TOKEN=${YC_IAM_TOKEN}
+      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
+      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - YC_OBJECT_STORAGE_BUCKET=${YC_OBJECT_STORAGE_BUCKET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ─── AI Service ───────────────────────────────────────────────
   ai:
     build: .

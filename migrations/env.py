@@ -8,6 +8,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from backend.audit.models import AuditLog  # noqa: F401
+from backend.auth.models import EmployeeUser, Role, RolePermission  # noqa: F401
+from backend.loyalty.models import LoyaltyAccount, LoyaltyTransaction  # noqa: F401
+from backend.menu.models import MenuCategory, MenuItem, MenuItemModifier, MenuStopList, ModifierOption  # noqa: F401
+from backend.orders.models import GuestSession, Order, OrderEvent, OrderItem  # noqa: F401
+from backend.settings.models import TenantSettings  # noqa: F401
 from shared.config import get_settings
 from shared.database import Base
 from shared.models import Plan, Subscription, Tenant  # noqa: F401

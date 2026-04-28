@@ -1,63 +1,87 @@
-# tests/test_tenant_isolation.py
-"""Tests for multi-tenant JWT isolation."""
+"""Tests for admin tenant middleware isolation."""
 
+from __future__ import annotations
+
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.main import app
-from tests.conftest import get_test_token
+from apps.admin_api.middleware import tenant_context_middleware
+from shared.jwt_utils import create_access_token
+
+
+class FakeTenantSession:
+    """Very small async session double for middleware tests."""
+
+    def __init__(self, tenant: object | None) -> None:
+        self.tenant = tenant
+        self.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: self.tenant))
+        self.begin = AsyncMock()
+        self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+        self.close = AsyncMock()
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
+def isolation_app() -> FastAPI:
+    app = FastAPI()
+    app.middleware("http")(tenant_context_middleware)
+
+    @app.get("/admin/v1/protected")
+    async def protected() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
 
 
-@pytest.mark.skip(reason="Tenant isolation middleware not yet implemented globally")
-class TestTenantIsolation:
-    """Verify that X-Tenant-ID is bound to JWT."""
+def test_mismatched_tenant_returns_403(isolation_app: FastAPI) -> None:
+    client = TestClient(isolation_app)
+    token = create_access_token(user_id=1, tenant_id="tenant-a", role="owner")
+    response = client.get(
+        "/admin/v1/protected",
+        headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": "tenant-b"},
+    )
+    assert response.status_code == 403  # nosec B101
+    assert response.json()["code"] == "TENANT_MISMATCH"  # nosec B101
 
-    def test_valid_token_and_matching_tenant(self, client: TestClient) -> None:
-        """Should allow access when token tenant matches header."""
-        with patch("api.routes.orders.get_raw_pool") as mock_pool:
-            mock_pool.return_value.fetchrow = AsyncMock(return_value=None)
-            response = client.get(
-                "/api/v1/test/orders/1",
-                headers={
-                    "X-Tenant-ID": "test",
-                    "Authorization": f"Bearer {get_test_token(tenant_id='test')}",
-                },
-            )
-        assert response.status_code == 404  # order not found is expected  # nosec B101
 
-    def test_mismatched_tenant_returns_403(self, client: TestClient) -> None:
-        """Should reject when header tenant differs from JWT tenant."""
+def test_missing_auth_returns_401(isolation_app: FastAPI) -> None:
+    client = TestClient(isolation_app)
+    response = client.get("/admin/v1/protected")
+    assert response.status_code == 401  # nosec B101
+    assert response.json()["code"] == "AUTH_REQUIRED"  # nosec B101
+
+
+def test_valid_token_sets_context(isolation_app: FastAPI) -> None:
+    client = TestClient(isolation_app)
+    token = create_access_token(user_id=1, tenant_id="test", role="owner")
+    tenant = SimpleNamespace(id=1, slug="test", status="active", deleted_at=None)
+    fake_session = FakeTenantSession(tenant)
+    with (
+        patch("apps.admin_api.middleware.AsyncSessionLocal", return_value=fake_session),
+        patch("apps.admin_api.middleware.is_revoked", new=AsyncMock(return_value=False)),
+    ):
         response = client.get(
-            "/api/v1/other/orders/1",
-            headers={
-                "X-Tenant-ID": "other",
-                "Authorization": f"Bearer {get_test_token(tenant_id='test')}",
-            },
+            "/admin/v1/protected",
+            headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": "test"},
         )
-        assert response.status_code == 403  # nosec B101
-        assert response.json()["detail"] == "Tenant mismatch"  # nosec B101
+    assert response.status_code == 200  # nosec B101
 
-    def test_missing_auth_returns_403(self, client: TestClient) -> None:
-        """Should reject when X-Tenant-ID is present but no Authorization."""
-        response = client.get(
-            "/api/v1/test/orders/1",
-            headers={"X-Tenant-ID": "test"},
-        )
-        assert response.status_code == 403  # nosec B101
-        assert response.json()["detail"] == "Authorization required"  # nosec B101
 
-    def test_missing_tenant_header_returns_403(self, client: TestClient) -> None:
-        """Should reject when X-Tenant-ID is missing."""
+def test_unknown_tenant_returns_404(isolation_app: FastAPI) -> None:
+    client = TestClient(isolation_app)
+    token = create_access_token(user_id=1, tenant_id="test", role="owner")
+    fake_session = FakeTenantSession(None)
+    with (
+        patch("apps.admin_api.middleware.AsyncSessionLocal", return_value=fake_session),
+        patch("apps.admin_api.middleware.is_revoked", new=AsyncMock(return_value=False)),
+    ):
         response = client.get(
-            "/api/v1/test/orders/1",
-            headers={"Authorization": f"Bearer {get_test_token()}"},
+            "/admin/v1/protected",
+            headers={"Authorization": f"Bearer {token}", "X-Tenant-ID": "test"},
         )
-        assert response.status_code == 403  # nosec B101
-        assert response.json()["detail"] == "X-Tenant-ID header required"  # nosec B101
+    assert response.status_code == 404  # nosec B101
+    assert response.json()["code"] == "TENANT_NOT_FOUND"  # nosec B101

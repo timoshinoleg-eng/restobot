@@ -73,8 +73,12 @@ bandit = "^1.9.4"
 [tool.poetry.scripts]
 restobot-bot = "bot.main:main"
 restobot-api = "api.main:main"
+restobot-admin-api = "apps.admin_api.main:main"
+restobot-public-api = "apps.public_api.main:main"
 restobot-ai = "ai.main:main"
 restobot-worker = "payments.worker:main"
+restobot-bootstrap-local = "scripts.bootstrap_local:run"
+restobot-smoke-local-mvp = "scripts.smoke_local_mvp:main"
 
 [tool.black]
 line-length = 100
