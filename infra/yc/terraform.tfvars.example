@@ -8,11 +8,15 @@ jwt_secret          = "replace-with-long-jwt-secret-at-least-32-chars"
 telegram_token      = "replace-with-telegram-bot-token"
 yokassa_shop_id     = "replace-with-yookassa-shop-id"
 yokassa_secret_key  = "replace-with-yookassa-secret-key"
+bootstrap_api_token = "replace-with-bootstrap-api-token"
+enable_bootstrap_api = false
+database_pool_min   = 1
+database_pool_max   = 2
 
 yc_zone             = "ru-central1-a"
 subnet_cidr         = "10.10.0.0/24"
 object_storage_bucket = "restobot-mvp-assets"
 
-admin_image         = "cr.yandex/placeholder/restobot-admin:latest"
-public_image        = "cr.yandex/placeholder/restobot-public:latest"
-migration_image     = "cr.yandex/placeholder/restobot-admin:latest"
+admin_image         = "cr.yandex/placeholder/restobot-admin:bootstrap"
+public_image        = "cr.yandex/placeholder/restobot-public:bootstrap"
+migration_image     = "cr.yandex/placeholder/restobot-admin:bootstrap"

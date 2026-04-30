@@ -22,11 +22,14 @@ resource "yandex_serverless_container" "admin_api" {
 
   image {
     url      = var.admin_image
-    command  = ["sh", "-c"]
-    args     = ["uvicorn apps.admin_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+    command  = ["python"]
+    args     = ["scripts/run_admin.py"]
     work_dir = "/app"
     environment = {
       ENVIRONMENT              = "production"
+      ENABLE_BOOTSTRAP_API     = tostring(var.enable_bootstrap_api)
+      DATABASE_POOL_MIN        = tostring(var.database_pool_min)
+      DATABASE_POOL_MAX        = tostring(var.database_pool_max)
       LOG_FORMAT               = "json"
       LOG_LEVEL                = "INFO"
       YC_CLOUD_ID              = var.yc_cloud_id
@@ -61,6 +64,16 @@ resource "yandex_serverless_container" "admin_api" {
     version_id           = yandex_lockbox_secret_version.common.id
     key                  = "yokassa_secret_key"
     environment_variable = "YOOKASSA_SECRET_KEY"
+  }
+
+  dynamic "secrets" {
+    for_each = var.bootstrap_api_token == null ? [] : [1]
+    content {
+      id                   = yandex_lockbox_secret.common.id
+      version_id           = yandex_lockbox_secret_version.common.id
+      key                  = "bootstrap_api_token"
+      environment_variable = "BOOTSTRAP_API_TOKEN"
+    }
   }
 
   secrets {
@@ -107,11 +120,13 @@ resource "yandex_serverless_container" "public_api" {
 
   image {
     url      = var.public_image
-    command  = ["sh", "-c"]
-    args     = ["uvicorn apps.public_api.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+    command  = ["python"]
+    args     = ["scripts/run_public.py"]
     work_dir = "/app"
     environment = {
       ENVIRONMENT              = "production"
+      DATABASE_POOL_MIN        = tostring(var.database_pool_min)
+      DATABASE_POOL_MAX        = tostring(var.database_pool_max)
       LOG_FORMAT               = "json"
       LOG_LEVEL                = "INFO"
       YC_CLOUD_ID              = var.yc_cloud_id
@@ -193,6 +208,8 @@ resource "yandex_serverless_container" "migration_runner" {
     work_dir = "/app"
     environment = {
       ENVIRONMENT              = "production"
+      DATABASE_POOL_MIN        = tostring(var.database_pool_min)
+      DATABASE_POOL_MAX        = tostring(var.database_pool_max)
       LOG_FORMAT               = "json"
       LOG_LEVEL                = "INFO"
       YC_CLOUD_ID              = var.yc_cloud_id

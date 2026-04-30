@@ -11,6 +11,7 @@ RestoBot - backend/API для ресторанного MVP на FastAPI, Postgre
 - отдельный bootstrap для remote state в `infra/state_backend`
 - одноразовый migration runner в `scripts/migrate_cloud.py`
 - smoke-тест после деплоя в `scripts/smoke_cloud.py`
+- seed-скрипт для demo tenant в `scripts/seed_demo_tenant.py`
 
 ## Локальный запуск
 
@@ -24,6 +25,29 @@ poetry run uvicorn api.main:app --reload --port 8001
 
 Локально основной совместимый HTTP API доступен на `http://localhost:8001`.
 
+## Demo tenant для пилота
+
+Для воспроизводимого demo/pilot-контура добавлен seed-скрипт:
+
+```bash
+poetry run python scripts/seed_demo_tenant.py --tenant-id demo
+```
+
+Скрипт:
+
+1. создаёт или обновляет tenant;
+2. создаёт admin-пользователя;
+3. записывает demo menu;
+4. возвращает `admin_token` для последующих admin-вызовов.
+
+Если нужен только JSON-шаблон меню без записи в БД:
+
+```bash
+poetry run python scripts/seed_demo_tenant.py --print-menu-template
+```
+
+Шаблон также сохранён в [MENU_UPLOAD_TEMPLATE.json](<C:/Users/Имярек/Downloads/restobot-main/MENU_UPLOAD_TEMPLATE.json>).
+
 ## Деплой в Yandex Cloud
 
 Короткий сценарий:
@@ -33,11 +57,17 @@ poetry run uvicorn api.main:app --reload --port 8001
 3. Заполнить `infra/yc/terraform.tfvars`.
 4. Выполнить bootstrap инфраструктуры без контейнеров.
 5. Собрать и запушить Docker-образы в Yandex Container Registry.
-6. Выполнить полный `terraform apply` с реальными image URL.
+6. Выполнить `terraform plan` и затем `terraform apply` с реальными image URL, временно включив `enable_bootstrap_api=true`.
 7. Запустить migration runner.
-8. Выполнить `poetry run python scripts/smoke_cloud.py --gateway-url <gateway-url>`.
+8. Выполнить `poetry run python scripts/smoke_cloud.py --gateway-url <gateway-url> --bootstrap-token <bootstrap-token>`.
+9. После smoke вернуть `enable_bootstrap_api=false` и применить Terraform повторно.
 
 Подробная инструкция находится в [DEPLOYMENT.md](<C:/Users/Имярек/Downloads/restobot-main/DEPLOYMENT.md>).
+
+Для операторского запуска пилота дополнительно подготовлены:
+
+- [PILOT_LAUNCH_CHECKLIST.md](<C:/Users/Имярек/Downloads/restobot-main/PILOT_LAUNCH_CHECKLIST.md>)
+- [CUSTOMER_ONBOARDING_CHECKLIST.md](<C:/Users/Имярек/Downloads/restobot-main/CUSTOMER_ONBOARDING_CHECKLIST.md>)
 
 ## Автоматизация bootstrap
 

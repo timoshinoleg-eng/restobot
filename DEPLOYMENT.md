@@ -11,7 +11,7 @@
 - Serverless Container `admin-api`
 - Serverless Container `public-api`
 - Serverless Container `migration-runner` в режиме `task`
-- Yandex API Gateway с маршрутами `/admin/*`, `/widget/*`, `/health`
+- Yandex API Gateway с маршрутами `/admin/*`, `/widget/*`, `/api/v1/*`, `/health`
 
 ## Предварительные требования
 
@@ -79,6 +79,7 @@ Copy-Item infra\state_backend\terraform.tfvars.example infra\state_backend\terra
 - `yc_cloud_id`
 - `yc_folder_id`
 - секреты БД/Redis/JWT/Telegram/YooKassa
+- `bootstrap_api_token` для защищённого onboarding/smoke-flow
 - уникальное имя bucket для remote state
 
 ## 4. Поднятие remote backend в Yandex Object Storage
@@ -192,17 +193,13 @@ $adminImage = "cr.yandex/$registryId/restobot-admin:$sha"
 $publicImage = "cr.yandex/$registryId/restobot-public:$sha"
 $migrationImage = "cr.yandex/$registryId/restobot-migrate:$sha"
 
-docker build -f docker/Dockerfile.admin -t $adminImage -t "cr.yandex/$registryId/restobot-admin:latest" .
-docker build -f docker/Dockerfile.public -t $publicImage -t "cr.yandex/$registryId/restobot-public:latest" .
+docker build -f docker/Dockerfile.admin -t $adminImage .
+docker build -f docker/Dockerfile.public -t $publicImage .
 docker tag $adminImage $migrationImage
-docker tag $adminImage "cr.yandex/$registryId/restobot-migrate:latest"
 
 docker push $adminImage
-docker push "cr.yandex/$registryId/restobot-admin:latest"
 docker push $publicImage
-docker push "cr.yandex/$registryId/restobot-public:latest"
 docker push $migrationImage
-docker push "cr.yandex/$registryId/restobot-migrate:latest"
 ```
 
 ## 8. Полный Terraform apply
@@ -210,10 +207,13 @@ docker push "cr.yandex/$registryId/restobot-migrate:latest"
 После публикации образов:
 
 ```powershell
-terraform -chdir=infra/yc apply -auto-approve `
+terraform -chdir=infra/yc plan `
+  -out deploy.tfplan `
+  -var "enable_bootstrap_api=true" `
   -var "admin_image=$adminImage" `
   -var "public_image=$publicImage" `
   -var "migration_image=$migrationImage"
+terraform -chdir=infra/yc apply deploy.tfplan
 ```
 
 Получите gateway URL:
@@ -252,7 +252,19 @@ poetry run python scripts/migrate_cloud.py --check-only
 Запуск:
 
 ```powershell
-poetry run python scripts/smoke_cloud.py --gateway-url $gatewayUrl
+poetry run python scripts/smoke_cloud.py --gateway-url $gatewayUrl --bootstrap-token "<bootstrap-api-token>"
+```
+
+Сразу после smoke-test закройте bootstrap endpoint:
+
+```powershell
+terraform -chdir=infra/yc plan `
+  -out close-bootstrap.tfplan `
+  -var "enable_bootstrap_api=false" `
+  -var "admin_image=$adminImage" `
+  -var "public_image=$publicImage" `
+  -var "migration_image=$migrationImage"
+terraform -chdir=infra/yc apply close-bootstrap.tfplan
 ```
 
 Smoke-сценарий проходит:
@@ -271,7 +283,26 @@ Smoke-сценарий проходит:
 SUCCESS
 ```
 
-## 11. GitHub Actions
+Если нужен фиксированный tenant для ручной demo-проверки:
+
+```powershell
+poetry run python scripts/seed_demo_tenant.py --tenant-id demo
+```
+
+Скрипт создаёт или обновляет demo tenant и записывает каноническое demo menu. Для ручной подготовки клиентского меню можно использовать [MENU_UPLOAD_TEMPLATE.json](<C:/Users/Имярек/Downloads/restobot-main/MENU_UPLOAD_TEMPLATE.json>).
+
+## 11. Краткий операторский прогон
+
+Минимальный порядок действий для пилота:
+
+1. включить bootstrap API на время начального seed/smoke;
+2. выполнить миграции;
+3. создать demo/pilot tenant через `seed_demo_tenant.py` или `admin/onboarding`;
+4. прогнать `smoke_cloud.py`;
+5. выключить bootstrap API и повторно применить Terraform;
+6. пройтись по [PILOT_LAUNCH_CHECKLIST.md](<C:/Users/Имярек/Downloads/restobot-main/PILOT_LAUNCH_CHECKLIST.md>).
+
+## 12. GitHub Actions
 
 Workflow расположен в [deploy.yml](<C:/Users/Имярек/Downloads/restobot-main/.github/workflows/deploy.yml>).
 
@@ -286,6 +317,7 @@ Workflow расположен в [deploy.yml](<C:/Users/Имярек/Downloads/r
 - `TF_VAR_TELEGRAM_TOKEN`
 - `TF_VAR_YOKASSA_SHOP_ID`
 - `TF_VAR_YOKASSA_SECRET_KEY`
+- `TF_VAR_BOOTSTRAP_API_TOKEN`
 
 Workflow выполняет:
 
@@ -297,7 +329,7 @@ Workflow выполняет:
 6. invoke migration runner
 7. smoke test
 
-## 12. Мониторинг и логи
+## 13. Мониторинг и логи
 
 Основные точки наблюдения:
 
@@ -324,6 +356,18 @@ Workflow выполняет:
 ### Ограничение max scale
 
 У текущего Terraform provider для Serverless Containers есть управление warm instances (`min_instances`), но нет полноценного hard-поля для верхнего лимита инстансов.
+
+Чтобы не выбить PostgreSQL по connection budget, в стек добавлены консервативные лимиты:
+
+- `database_pool_min = 1`
+- `database_pool_max = 2`
+
+Если вы поднимаете большую нагрузку, сначала пересчитайте бюджет соединений, а уже потом увеличивайте pool size.
+
+### Redis TLS
+
+Managed Redis теперь разворачивается с `tls_enabled = true`, а `REDIS_URL` формируется как `rediss://...`.
+Убедитесь, что ваши ручные клиенты и отладочные скрипты тоже используют TLS.
 
 ### Redis preset
 

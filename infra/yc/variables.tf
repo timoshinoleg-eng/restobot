@@ -51,6 +51,43 @@ variable "yokassa_secret_key" {
   sensitive   = true
 }
 
+variable "bootstrap_api_token" {
+  description = "Optional bootstrap token required for production onboarding and smoke bootstrap."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "enable_bootstrap_api" {
+  description = "Whether the protected bootstrap onboarding endpoint is enabled in production."
+  type        = bool
+  default     = false
+  validation {
+    condition     = var.enable_bootstrap_api == false || var.bootstrap_api_token != null
+    error_message = "bootstrap_api_token must be set when enable_bootstrap_api is true."
+  }
+}
+
+variable "database_pool_min" {
+  description = "Minimum SQLAlchemy/asyncpg pool size per container instance."
+  type        = number
+  default     = 1
+  validation {
+    condition     = var.database_pool_min >= 1
+    error_message = "database_pool_min must be at least 1."
+  }
+}
+
+variable "database_pool_max" {
+  description = "Maximum SQLAlchemy/asyncpg pool size per container instance."
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.database_pool_max >= var.database_pool_min
+    error_message = "database_pool_max must be greater than or equal to database_pool_min."
+  }
+}
+
 variable "yc_zone" {
   description = "Primary availability zone for VPC subnet and managed databases."
   type        = string

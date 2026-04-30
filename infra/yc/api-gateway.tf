@@ -46,5 +46,20 @@ paths:
         type: serverless_containers
         container_id: ${yandex_serverless_container.public_api.id}
         service_account_id: ${yandex_iam_service_account.runtime.id}
+  /api/v1/{proxy+}:
+    x-yc-apigateway-any-method:
+      parameters:
+        - name: proxy
+          in: path
+          required: false
+          explode: false
+          style: simple
+          schema:
+            type: string
+            default: "-"
+      x-yc-apigateway-integration:
+        type: serverless_containers
+        container_id: ${yandex_serverless_container.public_api.id}
+        service_account_id: ${yandex_iam_service_account.runtime.id}
 EOT
 }

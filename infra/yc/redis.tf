@@ -3,7 +3,7 @@ resource "yandex_mdb_redis_cluster" "restobot" {
   environment        = "PRODUCTION"
   network_id         = yandex_vpc_network.restobot.id
   security_group_ids = [yandex_vpc_security_group.restobot_data_plane.id]
-  tls_enabled        = false
+  tls_enabled        = true
 
   config {
     password = var.redis_password

@@ -1,8 +1,8 @@
 locals {
   db_host      = yandex_mdb_postgresql_cluster.restobot.host[0].fqdn
   redis_host   = yandex_mdb_redis_cluster.restobot.host[0].fqdn
-  database_url = "postgresql+asyncpg://${yandex_mdb_postgresql_user.restobot.name}:${var.db_password}@${local.db_host}:6432/${yandex_mdb_postgresql_database.restobot.name}"
-  redis_url    = "redis://:${var.redis_password}@${local.redis_host}:6379/0"
+  database_url = "postgresql+asyncpg://${yandex_mdb_postgresql_user.restobot.name}:${urlencode(var.db_password)}@${local.db_host}:6432/${yandex_mdb_postgresql_database.restobot.name}"
+  redis_url    = "rediss://:${urlencode(var.redis_password)}@${local.redis_host}:6379/0"
 }
 
 resource "yandex_lockbox_secret" "common" {
@@ -60,6 +60,20 @@ resource "yandex_lockbox_secret_version" "common" {
       args = ["${path.module}/scripts/echo_secret.py"]
       env = {
         SECRET_VALUE = var.yokassa_secret_key
+      }
+    }
+  }
+
+  dynamic "entries" {
+    for_each = var.bootstrap_api_token == null ? [] : [var.bootstrap_api_token]
+    content {
+      key = "bootstrap_api_token"
+      command {
+        path = "python"
+        args = ["${path.module}/scripts/echo_secret.py"]
+        env = {
+          SECRET_VALUE = entries.value
+        }
       }
     }
   }

@@ -44,6 +44,7 @@ jobs:
       TF_VAR_telegram_token: ${{ secrets.TF_VAR_TELEGRAM_TOKEN }}
       TF_VAR_yokassa_shop_id: ${{ secrets.TF_VAR_YOKASSA_SHOP_ID }}
       TF_VAR_yokassa_secret_key: ${{ secrets.TF_VAR_YOKASSA_SECRET_KEY }}
+      TF_VAR_bootstrap_api_token: ${{ secrets.TF_VAR_BOOTSTRAP_API_TOKEN }}
 
     steps:
       - name: Checkout
@@ -81,6 +82,10 @@ jobs:
       - name: Ruff
         run: poetry run ruff check .
 
+      - name: Terraform fmt
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform fmt -check -recursive
+
       - name: Unit tests
         env:
           DATABASE_URL: postgresql+asyncpg://restobot:password@localhost:5432/restobot
@@ -97,10 +102,14 @@ jobs:
         working-directory: ${{ env.TERRAFORM_DIR }}
         run: terraform init
 
-      - name: Bootstrap infra without containers
+      - name: Terraform validate
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform validate
+
+      - name: Bootstrap infra plan
         working-directory: ${{ env.TERRAFORM_DIR }}
         run: |
-          terraform apply -auto-approve \
+          terraform plan -out=bootstrap.tfplan \
             -target=yandex_container_repository.admin \
             -target=yandex_container_repository.public \
             -target=yandex_container_repository.migration \
@@ -109,6 +118,10 @@ jobs:
             -target=yandex_lockbox_secret_version.common \
             -target=yandex_lockbox_secret_version.db \
             -target=yandex_lockbox_secret_version.redis
+
+      - name: Bootstrap infra apply
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform apply bootstrap.tfplan
 
       - name: Resolve registry and image tags
         id: image_meta
@@ -119,52 +132,57 @@ jobs:
           echo "admin_image=cr.yandex/$REGISTRY_ID/restobot-admin:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "public_image=cr.yandex/$REGISTRY_ID/restobot-public:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           echo "migration_image=cr.yandex/$REGISTRY_ID/restobot-migrate:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "admin_latest=cr.yandex/$REGISTRY_ID/restobot-admin:latest" >> "$GITHUB_OUTPUT"
-          echo "public_latest=cr.yandex/$REGISTRY_ID/restobot-public:latest" >> "$GITHUB_OUTPUT"
-          echo "migration_latest=cr.yandex/$REGISTRY_ID/restobot-migrate:latest" >> "$GITHUB_OUTPUT"
 
       - name: Configure Docker for YC Container Registry
         run: yc container registry configure-docker
 
       - name: Build admin image
         run: |
-          docker build -f docker/Dockerfile.admin -t "${{ steps.image_meta.outputs.admin_image }}" -t "${{ steps.image_meta.outputs.admin_latest }}" .
+          docker build -f docker/Dockerfile.admin -t "${{ steps.image_meta.outputs.admin_image }}" .
 
       - name: Build public image
         run: |
-          docker build -f docker/Dockerfile.public -t "${{ steps.image_meta.outputs.public_image }}" -t "${{ steps.image_meta.outputs.public_latest }}" .
+          docker build -f docker/Dockerfile.public -t "${{ steps.image_meta.outputs.public_image }}" .
 
       - name: Tag migration image
         run: |
           docker tag "${{ steps.image_meta.outputs.admin_image }}" "${{ steps.image_meta.outputs.migration_image }}"
-          docker tag "${{ steps.image_meta.outputs.admin_image }}" "${{ steps.image_meta.outputs.migration_latest }}"
 
       - name: Push images
         run: |
           docker push "${{ steps.image_meta.outputs.admin_image }}"
-          docker push "${{ steps.image_meta.outputs.admin_latest }}"
           docker push "${{ steps.image_meta.outputs.public_image }}"
-          docker push "${{ steps.image_meta.outputs.public_latest }}"
           docker push "${{ steps.image_meta.outputs.migration_image }}"
-          docker push "${{ steps.image_meta.outputs.migration_latest }}"
 
-      - name: Deploy containers and gateway
+      - name: Deploy plan
         working-directory: ${{ env.TERRAFORM_DIR }}
         run: |
-          terraform apply -auto-approve \
+          terraform plan -out=deploy.tfplan \
+            -var "enable_bootstrap_api=true" \
             -var "admin_image=${{ steps.image_meta.outputs.admin_image }}" \
             -var "public_image=${{ steps.image_meta.outputs.public_image }}" \
             -var "migration_image=${{ steps.image_meta.outputs.migration_image }}"
+
+      - name: Deploy apply
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform apply deploy.tfplan
 
       - name: Run cloud migrations
         working-directory: ${{ env.TERRAFORM_DIR }}
         run: |
           MIGRATION_URL="$(terraform output -raw migration_container_url)"
-          curl -fsS \
-            -D "$RUNNER_TEMP/migration-headers.txt" \
-            -o "$RUNNER_TEMP/migration-body.txt" \
-            -H "Authorization: Bearer $(yc iam create-token)" \
-            "$MIGRATION_URL"
+          for attempt in 1 2 3; do
+            curl -fsS \
+              -D "$RUNNER_TEMP/migration-headers.txt" \
+              -o "$RUNNER_TEMP/migration-body.txt" \
+              -H "Authorization: Bearer $(yc iam create-token)" \
+              "$MIGRATION_URL" && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "Migration runner invoke failed after retries"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           if ! grep -qi '^x-task-exit-code: 0' "$RUNNER_TEMP/migration-headers.txt"; then
             echo "Migration runner failed"
             cat "$RUNNER_TEMP/migration-headers.txt"
@@ -176,4 +194,17 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           GATEWAY_URL="$(terraform -chdir=${{ env.TERRAFORM_DIR }} output -raw gateway_url)"
-          poetry run python scripts/smoke_cloud.py --gateway-url "$GATEWAY_URL"
+          poetry run python scripts/smoke_cloud.py \
+            --gateway-url "$GATEWAY_URL" \
+            --bootstrap-token "${{ secrets.TF_VAR_BOOTSTRAP_API_TOKEN }}"
+
+      - name: Disable bootstrap endpoint
+        if: always()
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform plan -out=close-bootstrap.tfplan \
+            -var "enable_bootstrap_api=false" \
+            -var "admin_image=${{ steps.image_meta.outputs.admin_image }}" \
+            -var "public_image=${{ steps.image_meta.outputs.public_image }}" \
+            -var "migration_image=${{ steps.image_meta.outputs.migration_image }}"
+          terraform apply close-bootstrap.tfplan
