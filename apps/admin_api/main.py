@@ -3,15 +3,14 @@
 import os
 from typing import Any, Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
 from api.routes import dashboard, orders
 from shared.app_factory import create_base_app
-from shared.config import get_settings
+from shared.auth_dependencies import bind_tenant_context, require_admin_user, require_bootstrap_access
 from shared.mvp_bootstrap import bootstrap_tenant, replace_menu, update_order_status
 
-settings = get_settings()
 app = create_base_app(
     title="RestoBot Admin API",
     description="Admin API for onboarding, menu management, and order operations.",
@@ -54,25 +53,12 @@ class OrderStatusUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(new|confirmed|preparing|ready|delivering|completed|cancelled)$")
     payment_status: Optional[str] = Field(default=None, pattern=r"^(pending|paid|failed|refunded)$")
 
-
-def require_admin(request: Request) -> None:
-    """Require an admin token for state-changing admin operations."""
-    role = getattr(request.state, "user_role", None)
-    if role not in {"admin", "owner"}:
-        raise HTTPException(status_code=403, detail="Admin or owner access required")
-
-
-def bind_tenant(request: Request, tenant: str) -> None:
-    """Populate tenant context from path parameter."""
-    request.state.tenant_id = tenant
-    request.state.tenant_schema = settings.get_tenant_schema(tenant)
-    token_tenant_id = getattr(request.state, "token_tenant_id", None)
-    if token_tenant_id and token_tenant_id != tenant:
-        raise HTTPException(status_code=403, detail="Tenant mismatch")
-
-
 @app.post("/admin/onboarding", status_code=201)
-async def onboarding(body: OnboardingRequest) -> dict[str, Any]:
+async def onboarding(
+    body: OnboardingRequest,
+    request: Request,
+    _: None = Depends(require_bootstrap_access),
+) -> dict[str, Any]:
     """Create a shared tenant row and a dedicated tenant schema."""
     return await bootstrap_tenant(
         tenant_id=body.tenant_id,
@@ -89,10 +75,10 @@ async def upload_menu(
     tenant: str,
     body: MenuUploadRequest,
     request: Request,
-    _: None = Depends(require_admin),
+    _: None = Depends(require_admin_user),
 ) -> dict[str, Any]:
     """Replace the current tenant menu with a new payload."""
-    bind_tenant(request, tenant)
+    bind_tenant_context(request, tenant)
     return await replace_menu(
         tenant_id=tenant,
         categories=[category.model_dump() for category in body.categories],
@@ -103,8 +89,8 @@ async def upload_menu(
 @app.get("/admin/{tenant}/orders")
 async def admin_list_orders(tenant: str, request: Request) -> list[dict[str, Any]]:
     """List tenant orders via the admin surface."""
-    bind_tenant(request, tenant)
-    require_admin(request)
+    bind_tenant_context(request, tenant)
+    require_admin_user(request)
     return await orders.list_orders(request)
 
 
@@ -114,10 +100,10 @@ async def admin_update_order_status(
     order_id: int,
     body: OrderStatusUpdateRequest,
     request: Request,
-    _: None = Depends(require_admin),
+    _: None = Depends(require_admin_user),
 ) -> dict[str, Any]:
     """Update order and payment status from the admin console."""
-    bind_tenant(request, tenant)
+    bind_tenant_context(request, tenant)
     return await update_order_status(
         tenant_id=tenant,
         order_id=order_id,
@@ -128,8 +114,8 @@ async def admin_update_order_status(
 
 @app.get("/admin/{tenant}/dashboard/revenue")
 async def admin_revenue(tenant: str, request: Request, period: str = "day") -> dict[str, Any]:
-    bind_tenant(request, tenant)
-    require_admin(request)
+    bind_tenant_context(request, tenant)
+    require_admin_user(request)
     return await dashboard.revenue(request, period=period)
 
 

@@ -61,9 +61,6 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Docker
-.dockerignore
-
 # Poetry
 poetry.lock
 

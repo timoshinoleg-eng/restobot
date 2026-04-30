@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+infra
+*.tfstate
+*.tfstate.*
+key.json
+htmlcov
+.pytest_cache
+.mypy_cache

@@ -1,6 +1,7 @@
 """Application configuration using pydantic-settings."""
 
 import re
+from urllib.parse import quote
 from functools import lru_cache
 from typing import Optional
 
@@ -45,6 +46,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
+    REDIS_TLS_ENABLED: bool = False
     REDIS_CART_TTL: int = 1800
 
     TELEGRAM_BOT_TOKEN: str = Field(
@@ -84,6 +86,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = Field(..., min_length=32)
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 60
+    ENABLE_BOOTSTRAP_API: bool = False
+    BOOTSTRAP_API_TOKEN: Optional[str] = None
 
     LOG_LEVEL: str = Field(default="INFO", pattern=r"^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
     LOG_FORMAT: str = Field(default="json", pattern=r"^(json|text)$")
@@ -102,18 +106,19 @@ class Settings(BaseSettings):
                 )
             self.DATABASE_URL = (
                 "postgresql+asyncpg://"
-                f"{self.DATABASE_USER}:{self.DATABASE_PASSWORD}"
+                f"{self.DATABASE_USER}:{quote(self.DATABASE_PASSWORD, safe='')}"
                 f"@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
             )
 
         if not self.REDIS_URL:
+            redis_scheme = "rediss" if self.REDIS_TLS_ENABLED else "redis"
             if self.REDIS_HOST and self.REDIS_PASSWORD:
                 self.REDIS_URL = (
-                    f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/"
+                    f"{redis_scheme}://:{quote(self.REDIS_PASSWORD, safe='')}@{self.REDIS_HOST}:{self.REDIS_PORT}/"
                     f"{self.REDIS_DB}"
                 )
             elif self.REDIS_HOST:
-                self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+                self.REDIS_URL = f"{redis_scheme}://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
             else:
                 self.REDIS_URL = f"redis://localhost:6379/{self.REDIS_DB}"
 

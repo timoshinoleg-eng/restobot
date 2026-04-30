@@ -9,16 +9,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir poetry==1.7.1
+RUN useradd --create-home --shell /usr/sbin/nologin appuser
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --only main
 
-COPY . .
+COPY --chown=appuser:appuser . .
 
 ENV ENVIRONMENT=production
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD sh -c "curl -f http://localhost:${PORT:-8001}/health || exit 1"
 
-CMD ["sh", "-c", "uvicorn apps.public_api.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+USER appuser
+
+CMD ["python", "scripts/run_public.py"]

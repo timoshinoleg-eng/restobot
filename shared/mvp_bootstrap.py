@@ -197,6 +197,38 @@ async def ensure_tenant_schema(tenant_id: str) -> str:
     return tenant_schema
 
 
+async def require_existing_tenant_schema(tenant_id: str) -> str:
+    """Return an existing tenant schema and fail closed for unknown tenants."""
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+    pool = await get_raw_pool()
+
+    async with pool.acquire() as conn:
+        tenant_exists = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM shared.tenants
+                WHERE slug = $1 AND status = 'active'
+            )
+            """,
+            tenant_id,
+        )
+        schema_exists = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM information_schema.schemata
+                WHERE schema_name = $1
+            )
+            """,
+            tenant_schema,
+        )
+
+    if not tenant_exists or not schema_exists:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return tenant_schema
+
+
 async def bootstrap_tenant(
     tenant_id: str,
     restaurant_name: str,
@@ -379,7 +411,7 @@ async def create_widget_session(
     email: Optional[str],
 ) -> dict[str, Any]:
     """Create or update a widget user session and return a JWT."""
-    tenant_schema = await ensure_tenant_schema(tenant_id)
+    tenant_schema = await require_existing_tenant_schema(tenant_id)
     pool = await get_raw_pool()
 
     async with pool.acquire() as conn:

@@ -129,6 +129,7 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
     async def auth_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        request.state.auth_error = None
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
@@ -137,6 +138,8 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
                 request.state.user_id = payload.user_id
                 request.state.user_role = payload.role
                 request.state.token_tenant_id = payload.tenant_id
+            else:
+                request.state.auth_error = "Invalid bearer token"
         return await call_next(request)
 
     @app.get("/health")
@@ -144,11 +147,15 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
         return await build_health_response()
 
     @app.exception_handler(Exception)
-    async def generic_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("unhandled_exception", extra={"error": str(exc)})
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"code": "INTERNAL_ERROR", "message": "Internal server error"},
+            content={
+                "code": "INTERNAL_ERROR",
+                "message": "Internal server error",
+                "request_id": getattr(request.state, "request_id", None),
+            },
         )
 
     return app

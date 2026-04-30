@@ -47,6 +47,25 @@ class TestAdminAPI:
         assert response.status_code == 201  # nosec B101
         assert response.json() == mocked  # nosec B101
 
+    def test_onboarding_blocked_in_production_without_bootstrap_token(
+        self,
+        admin_client: TestClient,
+    ) -> None:
+        payload = {
+            "tenant_id": "smoke",
+            "restaurant_name": "Smoke Bistro",
+            "admin_name": "Owner",
+            "min_order_amount": 300,
+        }
+
+        with patch("shared.auth_dependencies.settings.ENVIRONMENT", "production"):
+            with patch("shared.auth_dependencies.settings.ENABLE_BOOTSTRAP_API", False):
+                with patch("shared.auth_dependencies.settings.BOOTSTRAP_API_TOKEN", None):
+                    response = admin_client.post("/admin/onboarding", json=payload)
+
+        assert response.status_code == 403  # nosec B101
+        assert response.json()["detail"] == "Bootstrap API is disabled"  # nosec B101
+
     def test_onboarding_rejects_invalid_tenant_id(self, admin_client: TestClient) -> None:
         response = admin_client.post(
             "/admin/onboarding",
@@ -66,8 +85,8 @@ class TestAdminAPI:
             json={"categories": [{"name": "Main", "items": []}]},
         )
 
-        assert response.status_code == 403  # nosec B101
-        assert response.json()["detail"] == "Admin or owner access required"  # nosec B101
+        assert response.status_code == 401  # nosec B101
+        assert response.json()["detail"] == "Authentication required"  # nosec B101
 
     def test_menu_upload_success(self, admin_client: TestClient) -> None:
         headers = {"Authorization": f"Bearer {get_test_token(role='admin', tenant_id='test')}"}
@@ -175,24 +194,22 @@ class TestPublicAPI:
             "access_token": "jwt",
         }
 
-        with patch("apps.public_api.main.ensure_tenant_schema", AsyncMock()) as ensure_schema:
-            with patch(
-                "apps.public_api.main.create_widget_session",
-                AsyncMock(return_value=mocked),
-            ) as create_widget_session:
-                response = public_client.post(
-                    "/widget/test/session",
-                    json={
-                        "external_id": "tg-123",
-                        "name": "Alice",
-                        "phone": "+79991112233",
-                        "email": "alice@example.com",
-                    },
-                )
+        with patch(
+            "apps.public_api.main.create_widget_session",
+            AsyncMock(return_value=mocked),
+        ) as create_widget_session:
+            response = public_client.post(
+                "/widget/test/session",
+                json={
+                    "external_id": "tg-123",
+                    "name": "Alice",
+                    "phone": "+79991112233",
+                    "email": "alice@example.com",
+                },
+            )
 
         assert response.status_code == 201  # nosec B101
         assert response.json() == mocked  # nosec B101
-        ensure_schema.assert_awaited_once_with("test")
         create_widget_session.assert_awaited_once()
 
     def test_widget_session_rejects_malformed_payload(self, public_client: TestClient) -> None:
@@ -239,6 +256,22 @@ class TestPublicAPI:
         assert response.status_code == 403  # nosec B101
         assert response.json()["detail"] == "User mismatch"  # nosec B101
 
+    def test_widget_create_order_requires_authentication(self, public_client: TestClient) -> None:
+        response = public_client.post(
+            "/widget/test/orders",
+            json={
+                "user_id": 10,
+                "type": "delivery",
+                "items": [{"menu_item_id": 1, "quantity": 1, "price": 250.0}],
+                "address": "Street 1",
+                "phone": "+79990000000",
+                "payment_method": "cash",
+            },
+        )
+
+        assert response.status_code == 401  # nosec B101
+        assert response.json()["detail"] == "Authentication required"  # nosec B101
+
     def test_widget_create_order_rejects_invalid_payload(self, public_client: TestClient) -> None:
         headers = {"Authorization": f"Bearer {get_test_token(user_id=10, tenant_id='test')}"}
 
@@ -258,6 +291,7 @@ class TestPublicAPI:
         assert response.status_code == 422  # nosec B101
 
     def test_widget_get_order_success(self, public_client: TestClient) -> None:
+        headers = {"Authorization": f"Bearer {get_test_token(user_id=10, tenant_id='test')}"}
         mocked = {
             "id": 1,
             "order_number": "R-001",
@@ -269,10 +303,16 @@ class TestPublicAPI:
         }
 
         with patch("apps.public_api.main.orders.get_order", AsyncMock(return_value=mocked)):
-            response = public_client.get("/widget/test/orders/1")
+            response = public_client.get("/widget/test/orders/1", headers=headers)
 
         assert response.status_code == 200  # nosec B101
         assert response.json() == mocked  # nosec B101
+
+    def test_widget_get_order_requires_authentication(self, public_client: TestClient) -> None:
+        response = public_client.get("/widget/test/orders/1")
+
+        assert response.status_code == 401  # nosec B101
+        assert response.json()["detail"] == "Authentication required"  # nosec B101
 
     def test_widget_get_order_rejects_tenant_mismatch(self, public_client: TestClient) -> None:
         headers = {"Authorization": f"Bearer {get_test_token(user_id=10, tenant_id='tenant_a')}"}
@@ -281,3 +321,14 @@ class TestPublicAPI:
 
         assert response.status_code == 403  # nosec B101
         assert response.json()["detail"] == "Tenant mismatch"  # nosec B101
+
+    def test_yookassa_webhook_route_is_exposed(self, public_client: TestClient) -> None:
+        payload = {"object": {"metadata": {"tenant_schema": "tenant_test"}}}
+
+        with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", None):
+            with patch("api.routes.payments.worker.handle_webhook", AsyncMock()) as handle_webhook:
+                response = public_client.post("/api/v1/test/webhook/yookassa", json=payload)
+
+        assert response.status_code == 200  # nosec B101
+        assert response.json() == {"status": "ok"}  # nosec B101
+        handle_webhook.assert_awaited_once()

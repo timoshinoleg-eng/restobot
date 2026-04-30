@@ -20,6 +20,7 @@ class SmokeFailure(RuntimeError):
 class SmokeContext:
     gateway_url: str
     tenant_id: str
+    bootstrap_token: str | None = None
 
 
 def assert_response(response: httpx.Response, expected_status: int, step: str) -> dict[str, Any]:
@@ -37,6 +38,9 @@ def assert_response(response: httpx.Response, expected_status: int, step: str) -
 async def run_smoke(context: SmokeContext) -> None:
     """Execute the onboarding -> menu -> session -> order -> status update scenario."""
     async with httpx.AsyncClient(base_url=context.gateway_url, timeout=30.0) as client:
+        onboarding_headers = (
+            {"X-Bootstrap-Token": context.bootstrap_token} if context.bootstrap_token else None
+        )
         onboarding_payload = {
             "tenant_id": context.tenant_id,
             "restaurant_name": "Smoke Test Bistro",
@@ -46,7 +50,11 @@ async def run_smoke(context: SmokeContext) -> None:
             "min_order_amount": 0,
         }
         onboarding = assert_response(
-            await client.post("/admin/onboarding", json=onboarding_payload),
+            await client.post(
+                "/admin/onboarding",
+                headers=onboarding_headers,
+                json=onboarding_payload,
+            ),
             201,
             "onboarding",
         )
@@ -170,11 +178,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway-url", required=True, help="Public API Gateway URL, e.g. https://...apigw.yandexcloud.net")
     parser.add_argument("--tenant-id", default=f"smoke_{uuid.uuid4().hex[:8]}")
+    parser.add_argument("--bootstrap-token", default=None)
     args = parser.parse_args()
 
     context = SmokeContext(
         gateway_url=args.gateway_url.rstrip("/"),
         tenant_id=args.tenant_id,
+        bootstrap_token=args.bootstrap_token,
     )
 
     try:

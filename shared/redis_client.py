@@ -18,11 +18,17 @@ async def get_redis() -> redis.Redis:
     """Get or create shared Redis client."""
     global _redis
     if _redis is None:
+        redis_url = settings.REDIS_URL or "redis://localhost:6379/0"
+        client_kwargs: dict[str, Any] = {
+            "decode_responses": True,
+            "socket_timeout": 5.0,
+            "socket_connect_timeout": 5.0,
+        }
+        if redis_url.startswith("rediss://"):
+            client_kwargs["ssl_cert_reqs"] = "required"
         _redis = redis.from_url(
-            settings.REDIS_URL or "redis://localhost:6379/0",
-            decode_responses=True,
-            socket_timeout=5.0,
-            socket_connect_timeout=5.0,
+            redis_url,
+            **client_kwargs,
         )  # type: ignore[no-untyped-call]
     return _redis
 
