@@ -36,6 +36,11 @@ sed -i "s|^PUBLIC_IMAGE=.*|PUBLIC_IMAGE=${PUBLIC_TAG}|" "$ENV_FILE"
 echo ">>> Pulling images..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull admin public
 
+# ─── Run database migrations before switching runtime ───────────────
+echo ">>> Running database migrations..."
+bash migrate.sh
+
+# ─── Start runtime ──────────────────────────────────────────────────
 echo ">>> Starting containers..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans
 

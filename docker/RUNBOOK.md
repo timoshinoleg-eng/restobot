@@ -34,10 +34,21 @@ cd /opt/restobot
 Скрипт:
 1. Сохраняет текущие теги в `.rollback.env`.
 2. Обновляет `ADMIN_IMAGE` / `PUBLIC_IMAGE` в `.env.prod` (создаёт ключ, если отсутствует).
-3. Делает `docker compose pull admin public && up -d`.
-4. **Поллит health каждые 5 секунд до 90 секунд**.
-5. **После healthy admin/public проверяет proxy ingress** (`curl` через Caddy на `/admin/health` и `/widget/health`).
-6. При любой неудаче — автоматически вызывает `rollback.sh`.
+3. Делает `docker compose pull admin public`.
+4. **Запускает `migrate.sh` — Alembic `upgrade head` в одноразовом контейнере**.
+5. Делает `docker compose up -d`.
+6. **Поллит health каждые 5 секунд до 90 секунд**.
+7. **После healthy admin/public проверяет proxy ingress** (`curl` через Caddy на `/admin/health` и `/widget/health`).
+8. При любой неудаче — автоматически вызывает `rollback.sh`.
+
+### Миграции вручную (вне deploy)
+
+```bash
+cd /opt/restobot
+bash migrate.sh
+```
+
+Использует текущий `ADMIN_IMAGE` из `.env.prod`. Безопасно запускать отдельно — Alembic применит только недостающие ревизии.
 
 ## Restart
 
