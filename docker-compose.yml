@@ -40,7 +40,10 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DATABASE_URL=postgresql+asyncpg://restobot:${POSTGRES_PASSWORD:-changeme}@postgres:5432/restobot
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_TLS_ENABLED=false
       - YC_FOLDER_ID=${YC_FOLDER_ID}
       - YC_IAM_TOKEN=${YC_IAM_TOKEN}
       - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
@@ -61,7 +64,10 @@ services:
       - "8001:8001"
     environment:
       - DATABASE_URL=postgresql+asyncpg://restobot:${POSTGRES_PASSWORD:-changeme}@postgres:5432/restobot
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_TLS_ENABLED=false
       - YC_FOLDER_ID=${YC_FOLDER_ID}
       - YC_IAM_TOKEN=${YC_IAM_TOKEN}
       - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
@@ -98,7 +104,10 @@ services:
     command: python -m payments.worker
     environment:
       - DATABASE_URL=postgresql+asyncpg://restobot:${POSTGRES_PASSWORD:-changeme}@postgres:5432/restobot
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_TLS_ENABLED=false
       - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
       - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
     depends_on:

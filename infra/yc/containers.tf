@@ -35,6 +35,10 @@ resource "yandex_serverless_container" "admin_api" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
+      REDIS_HOST               = local.redis_host
+      REDIS_PORT               = "6379"
+      REDIS_TLS_ENABLED        = "true"
+      REDIS_DB                 = "0"
     }
   }
 
@@ -86,8 +90,8 @@ resource "yandex_serverless_container" "admin_api" {
   secrets {
     id                   = yandex_lockbox_secret.redis.id
     version_id           = yandex_lockbox_secret_version.redis.id
-    key                  = "redis_url"
-    environment_variable = "REDIS_URL"
+    key                  = "redis_password"
+    environment_variable = "REDIS_PASSWORD"
   }
 
   log_options {
@@ -132,6 +136,10 @@ resource "yandex_serverless_container" "public_api" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
+      REDIS_HOST               = local.redis_host
+      REDIS_PORT               = "6379"
+      REDIS_TLS_ENABLED        = "true"
+      REDIS_DB                 = "0"
     }
   }
 
@@ -173,8 +181,8 @@ resource "yandex_serverless_container" "public_api" {
   secrets {
     id                   = yandex_lockbox_secret.redis.id
     version_id           = yandex_lockbox_secret_version.redis.id
-    key                  = "redis_url"
-    environment_variable = "REDIS_URL"
+    key                  = "redis_password"
+    environment_variable = "REDIS_PASSWORD"
   }
 
   log_options {
@@ -215,6 +223,10 @@ resource "yandex_serverless_container" "migration_runner" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
+      REDIS_HOST               = local.redis_host
+      REDIS_PORT               = "6379"
+      REDIS_TLS_ENABLED        = "true"
+      REDIS_DB                 = "0"
     }
   }
 
@@ -256,8 +268,8 @@ resource "yandex_serverless_container" "migration_runner" {
   secrets {
     id                   = yandex_lockbox_secret.redis.id
     version_id           = yandex_lockbox_secret_version.redis.id
-    key                  = "redis_url"
-    environment_variable = "REDIS_URL"
+    key                  = "redis_password"
+    environment_variable = "REDIS_PASSWORD"
   }
 
   log_options {

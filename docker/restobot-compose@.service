@@ -1,0 +1,19 @@
+[Unit]
+Description=RestoBot Production Compose (admin + public + caddy) for %i
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/restobot
+User=%i
+Group=%i
+ExecStartPre=-/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod pull admin public
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod down
+ExecReload=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --remove-orphans
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -262,7 +262,7 @@ async def create_order(request: Request, body: OrderCreateRequest) -> Any:
                 total,
                 body.loyalty_points_to_use,
                 body.loyalty_points_to_use,
-                [item.model_dump() for item in body.items],
+                json.dumps([item.model_dump() for item in body.items]),
                 body.address,
                 body.phone,
                 body.comment,

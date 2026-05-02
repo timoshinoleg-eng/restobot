@@ -8,6 +8,7 @@ Create Date: 2026-04-28 10:30:00.000000
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "000"
 down_revision: Union[str, None] = None
@@ -16,7 +17,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    bind = op.get_bind()
+    vector_available = bind.execute(
+        text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+    ).scalar()
+    if vector_available:
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE SCHEMA IF NOT EXISTS shared")
 
     op.execute(

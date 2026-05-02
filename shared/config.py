@@ -1,6 +1,7 @@
 """Application configuration using pydantic-settings."""
 
 import re
+import warnings
 from urllib.parse import quote
 from functools import lru_cache
 from typing import Optional
@@ -108,6 +109,14 @@ class Settings(BaseSettings):
                 "postgresql+asyncpg://"
                 f"{self.DATABASE_USER}:{quote(self.DATABASE_PASSWORD, safe='')}"
                 f"@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+            )
+
+        if "REDIS_URL" in self.model_fields_set and self.REDIS_URL:
+            warnings.warn(
+                "REDIS_URL is deprecated and unsafe with special characters in passwords. "
+                "Use REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB, REDIS_TLS_ENABLED instead.",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
         if not self.REDIS_URL:

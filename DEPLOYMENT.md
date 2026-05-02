@@ -366,7 +366,9 @@ Workflow выполняет:
 
 ### Redis TLS
 
-Managed Redis теперь разворачивается с `tls_enabled = true`, а `REDIS_URL` формируется как `rediss://...`.
+Managed Redis разворачивается с `tls_enabled = true`. В runtime передаются компоненты
+(`REDIS_HOST`, `REDIS_PASSWORD`, `REDIS_TLS_ENABLED=true`), а `REDIS_URL` deprecated
+и формируется приложением через `urllib.parse.quote` для безопасной работы со спецсимволами в пароле.
 Убедитесь, что ваши ручные клиенты и отладочные скрипты тоже используют TLS.
 
 ### Redis preset
