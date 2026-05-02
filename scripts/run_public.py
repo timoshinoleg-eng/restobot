@@ -1,8 +1,14 @@
 """Container entrypoint for the public API."""
 
 import os
+import pathlib
+import sys
 
 import uvicorn
+
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 if __name__ == "__main__":
