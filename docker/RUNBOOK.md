@@ -92,6 +92,26 @@ docker logs -f restobot-admin-1 --tail=100
 docker logs -f restobot-public-1 --tail=100
 ```
 
+## Ingress verification
+
+Быстрый regression-check для Caddy-маршрутизации (проверяет, что catch-all не перехватывает backend-пути):
+
+```bash
+cd /opt/restobot
+bash ingress_smoke.sh
+```
+
+Покрываемые кейсы:
+- `/admin/health` → `200` (проксировано на admin backend)
+- `/widget/health` → `200` (проксировано на public backend)
+- неизвестный путь (`/unknown-path-xyz`) → `404` от Caddy (тело содержит `Not Found`)
+- `POST /admin/onboarding` → `403` от backend (тело содержит `Bootstrap API is disabled`), а не `404` от Caddy
+
+Можно передать произвольный base URL:
+```bash
+bash ingress_smoke.sh http://51.250.91.143
+```
+
 ## Healthcheck
 
 Внешние endpoint-ы через Caddy (proxy rewrite → internal `/health` backend'ов):
