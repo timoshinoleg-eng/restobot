@@ -48,6 +48,50 @@ docker exec restobot-admin-1 python3 /tmp/provision_tenant.py \
 - В production должен быть выключен: `ENABLE_BOOTSTRAP_API=false`.
 - Если временно включён, обязательно задать `BOOTSTRAP_API_TOKEN` и сразу выключить после использования.
 
+## Demo tenant
+
+### Создать или обновить demo tenant
+
+```bash
+cd /opt/restobot
+docker cp ./scripts/seed_demo_tenant.py restobot-admin-1:/tmp/seed_demo_tenant.py
+docker exec restobot-admin-1 python3 /tmp/seed_demo_tenant.py --tenant-id demo
+```
+
+Команда идемпотентна:
+- Если tenant не существует — создаёт его.
+- Если существует — обновляет menu и выдаёт свежий `admin_token`.
+
+### Сбросить demo-данные (очистить заказы, оставить меню)
+
+```bash
+docker exec restobot-admin-1 python3 /tmp/seed_demo_tenant.py --tenant-id demo --reset
+```
+
+### Проверить demo tenant
+
+```bash
+# Admin health через Caddy
+curl http://localhost/admin/health
+
+# Widget session
+curl -X POST http://localhost/widget/demo/session \
+  -H "Content-Type: application/json" \
+  -d '{"external_id":"demo-user-1","name":"Demo","phone":"+79991112233"}'
+
+# Menu
+curl http://localhost/widget/demo/menu -H "Authorization: Bearer <user_token>"
+```
+
+### Demo данные
+
+- **Ресторан:** RestoBot Demo
+- **Админ:** demo@restobot.ru / +79990000000
+- **Меню:** 2 категории (Хиты, Напитки), 3 блюда
+  - Фирменный бургер — 490 ₽
+  - Картофель по-деревенски — 210 ₽
+  - Лимонад цитрус — 190 ₽
+
 ## Deploy
 
 ```bash
