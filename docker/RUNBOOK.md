@@ -23,6 +23,31 @@ REDIS_TLS_ENABLED=true
 
 Приложение (`shared/config.py`) само соберёт URL с `urllib.parse.quote` для пароля. Это исключает баг с парсингом `/` и других спецсимволов внутри Redis-URL.
 
+## Tenant provisioning (CLI)
+
+Production-операции **должны использовать CLI**, а не HTTP bootstrap endpoint.
+
+```bash
+cd /opt/restobot
+# Копируем скрипт в контейнер
+docker cp ./scripts/provision_tenant.py restobot-admin-1:/tmp/provision_tenant.py
+
+# Создаём tenant
+docker exec restobot-admin-1 python3 /tmp/provision_tenant.py \
+  --tenant-id bistro_01 \
+  --restaurant-name "Bistro 01" \
+  --admin-name "Owner Name" \
+  --admin-email "owner@bistro.ru" \
+  --admin-phone "+79990000000"
+```
+
+Результат — JSON с `admin_token`, который выдаётся в stdout. Сохраните его для оператора.
+
+**HTTP bootstrap API (`POST /admin/onboarding`) — deprecated fallback.**
+- Оставлен для совместимости со старыми smoke-тестами.
+- В production должен быть выключен: `ENABLE_BOOTSTRAP_API=false`.
+- Если временно включён, обязательно задать `BOOTSTRAP_API_TOKEN` и сразу выключить после использования.
+
 ## Deploy
 
 ```bash
