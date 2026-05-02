@@ -9,9 +9,15 @@ import json
 import pathlib
 import sys
 
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# Support both local development and container runtime
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Container fallback: /app is the project root in Docker
+if "/app" not in sys.path and pathlib.Path("/app").exists():
+    sys.path.insert(0, "/app")
 
 from pydantic import ValidationError
 
