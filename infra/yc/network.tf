@@ -34,6 +34,13 @@ resource "yandex_vpc_security_group" "restobot_data_plane" {
     v4_cidr_blocks = [var.subnet_cidr]
   }
 
+  ingress {
+    description    = "Allow Redis TLS from the serverless subnet."
+    protocol       = "TCP"
+    port           = 6380
+    v4_cidr_blocks = [var.subnet_cidr]
+  }
+
   egress {
     description    = "Allow response traffic and internal egress."
     protocol       = "ANY"
