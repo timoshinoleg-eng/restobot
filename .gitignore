@@ -69,3 +69,7 @@ poetry.lock
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
+
+# Deployment artifacts
+.deploy_tag
+.rollback.env
