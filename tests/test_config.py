@@ -1,9 +1,12 @@
 # tests/test_config.py
 """Tests for application configuration."""
 
+from datetime import datetime, timezone
+
 import pytest
 
 from shared.config import get_settings
+from shared.jwt_utils import create_access_token, verify_access_token
 
 
 class TestSettings:
@@ -26,3 +29,16 @@ class TestSettings:
         s1 = get_settings()
         s2 = get_settings()
         assert s1 is s2  # nosec B101
+
+    def test_jwt_timestamps_are_unix_seconds(self) -> None:
+        """JWT creation should emit numeric timestamps accepted by jose."""
+        token = create_access_token(user_id=1, tenant_id="demo")
+
+        payload = verify_access_token(token)
+
+        assert payload is not None  # nosec B101
+        assert isinstance(payload.iat, datetime)  # nosec B101
+        assert isinstance(payload.exp, datetime)  # nosec B101
+        assert payload.iat.tzinfo == timezone.utc  # nosec B101
+        assert payload.exp.tzinfo == timezone.utc  # nosec B101
+        assert payload.exp > payload.iat  # nosec B101

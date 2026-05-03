@@ -25,7 +25,7 @@ class TestPaymentSuccess:
             "amount": "1000.00",
             "loyalty_used": "100.00",
             "payment_status": "pending",
-            "items_json": json.dumps([{"name": "Pizza", "price": 500, "quantity": 2}]),
+            "items_json": json.dumps([{"menu_item_id": 10, "price": 500, "quantity": 2}]),
             "user_email": "test@test.com",
             "phone": "+79990000000",
         }
@@ -33,6 +33,7 @@ class TestPaymentSuccess:
         mock_pool = MagicMock()
         mock_conn = MagicMock()
         mock_conn.fetchrow = AsyncMock(return_value=mock_order)
+        mock_conn.fetch = AsyncMock(return_value=[{"id": 10, "name": "Pizza"}])
         mock_conn.fetchval = AsyncMock(return_value=1)
         mock_conn.execute = AsyncMock()
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)

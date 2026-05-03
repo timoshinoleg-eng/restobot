@@ -161,7 +161,7 @@ class TestAdminAPI:
         }
 
         with patch(
-            "apps.admin_api.main.update_order_status",
+            "api.routes.orders.update_order_status_route",
             AsyncMock(return_value=mocked),
         ) as update_order_status:
             response = admin_client.patch(
@@ -271,6 +271,40 @@ class TestPublicAPI:
 
         assert response.status_code == 401  # nosec B101
         assert response.json()["detail"] == "Authentication required"  # nosec B101
+
+    def test_widget_create_payment_requires_authentication(self, public_client: TestClient) -> None:
+        response = public_client.post("/api/v1/test/orders/5/payment")
+
+        assert response.status_code == 401  # nosec B101
+        assert response.json()["detail"] == "Authentication required"  # nosec B101
+
+    def test_widget_create_payment_success(self, public_client: TestClient) -> None:
+        headers = {"Authorization": f"Bearer {get_test_token(user_id=10, tenant_id='test')}"}
+        order_row = {
+            "id": 5,
+            "user_id": 10,
+            "payment_method": "online",
+            "payment_status": "pending",
+            "payment_id": None,
+        }
+        mocked = {
+            "payment_id": "pay_123",
+            "confirmation_url": "https://yookassa.example/confirm",
+            "status": "pending",
+        }
+
+        with patch("api.routes.payments.get_raw_pool", new_callable=AsyncMock) as get_raw_pool:
+            mock_pool = get_raw_pool.return_value
+            mock_pool.fetchrow = AsyncMock(return_value=order_row)
+            with patch(
+                "api.routes.payments.worker.process_payment",
+                AsyncMock(return_value=mocked),
+            ) as process_payment:
+                response = public_client.post("/api/v1/test/orders/5/payment", headers=headers)
+
+        assert response.status_code == 200  # nosec B101
+        assert response.json() == mocked  # nosec B101
+        process_payment.assert_awaited_once()
 
     def test_widget_create_order_rejects_invalid_payload(self, public_client: TestClient) -> None:
         headers = {"Authorization": f"Bearer {get_test_token(user_id=10, tenant_id='test')}"}
