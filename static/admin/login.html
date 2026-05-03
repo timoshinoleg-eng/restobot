@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>RestoBot Admin</h1>
+      <p>Вход в панель управления</p>
+      <form id="loginForm">
+        <div class="form-group">
+          <label>Tenant ID</label>
+          <input type="text" id="tenantId" placeholder="my-restaurant" required>
+        </div>
+        <div class="form-group">
+          <label>Телефон</label>
+          <input type="text" id="phone" placeholder="+7XXXXXXXXXX" required>
+        </div>
+        <div class="form-group">
+          <label>Пароль</label>
+          <input type="password" id="password" placeholder="Введите пароль" required>
+        </div>
+        <div class="form-group" id="setupTokenGroup" style="display:none">
+          <label>Код настройки (требуется при первом входе)</label>
+          <input type="text" id="setupToken" placeholder="Введите код настройки" maxlength="128">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Войти</button>
+      </form>
+      <p id="loginError" style="margin-top:12px;color:var(--danger);font-size:13px;text-align:center;display:none"></p>
+      <p style="margin-top:16px;font-size:12px;color:var(--text-secondary);text-align:center">
+        При первом входе потребуется код настройки, выданный администратором.
+      </p>
+    </div>
+  </div>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const err = document.getElementById('loginError');
+      err.style.display = 'none';
+      const tenant = document.getElementById('tenantId').value.trim();
+      const phone = document.getElementById('phone').value.trim();
+      const password = document.getElementById('password').value;
+      const setupToken = document.getElementById('setupToken').value.trim() || undefined;
+
+      try {
+        const res = await fetch(`/admin/${tenant}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ tenant_id: tenant, phone, password, setup_token: setupToken }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          err.textContent = data.detail || 'Ошибка входа';
+          err.style.display = 'block';
+          // Show setup token field if server says it's required
+          if (res.status === 403 && data.detail && data.detail.toLowerCase().includes('setup token')) {
+            document.getElementById('setupTokenGroup').style.display = 'block';
+          }
+          return;
+        }
+        localStorage.setItem('tenant_id', tenant);
+        location.href = '/admin/index.html#' + tenant;
+      } catch (e) {
+        err.textContent = 'Сетевая ошибка: ' + e.message;
+        err.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

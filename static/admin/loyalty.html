@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Лояльность — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <h1 style="margin-bottom:20px">Программа лояльности</h1>
+    <div class="card" style="max-width:480px;margin-bottom:24px">
+      <h3 style="margin-bottom:16px">Настройки</h3>
+      <form id="loyaltyForm">
+        <div class="form-group">
+          <label>% бонусов за заказ</label>
+          <input type="number" step="0.01" id="bonusPercent" required>
+        </div>
+        <div class="form-group">
+          <label>Макс. скидка (%)</label>
+          <input type="number" step="0.01" id="maxDiscount" required>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" id="isActive"> Активна</label>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px">История транзакций</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Пользователь</th><th>Тип</th><th>Баллы</th><th>Описание</th><th>Дата</th></tr></thead>
+          <tbody id="txTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/loyalty.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('loyalty');
+    initLoyalty();
+  </script>
+</body>
+</html>

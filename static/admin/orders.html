@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Заказы — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <h1 style="margin-bottom:20px">Заказы</h1>
+    <div class="filters">
+      <select id="statusFilter">
+        <option value="">Все статусы</option>
+        <option value="new">Новый</option>
+        <option value="confirmed">Подтверждён</option>
+        <option value="preparing">Готовится</option>
+        <option value="ready">Готов</option>
+        <option value="completed">Выполнен</option>
+        <option value="cancelled">Отменён</option>
+      </select>
+      <input type="date" id="dateFrom">
+      <input type="date" id="dateTo">
+      <button class="btn btn-primary" onclick="loadOrders()">Обновить</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>№</th><th>Сумма</th><th>Статус</th><th>Оплата</th><th>Дата</th><th></th></tr>
+        </thead>
+        <tbody id="ordersTable"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/orders.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('orders');
+    loadOrders();
+  </script>
+</body>
+</html>

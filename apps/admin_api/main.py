@@ -4,12 +4,30 @@ import os
 from typing import Any, Optional
 
 from fastapi import Depends, Request
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from api.routes import dashboard, orders
+from api.routes import (
+    audit,
+    auth,
+    bookings,
+    dashboard,
+    ingredients,
+    loyalty,
+    menu,
+    onboarding as onboarding_route,
+    orders,
+    settings as settings_route,
+    users,
+)
 from shared.app_factory import create_base_app
-from shared.auth_dependencies import bind_tenant_context, require_admin_user, require_bootstrap_access
-from shared.mvp_bootstrap import bootstrap_tenant, replace_menu, update_order_status
+from shared.auth_dependencies import (
+    admin_tenant_dependency,
+    bind_tenant_context,
+    require_admin_user,
+    require_bootstrap_access,
+)
+from shared.mvp_bootstrap import bootstrap_tenant, replace_menu
 
 app = create_base_app(
     title="RestoBot Admin API",
@@ -52,6 +70,7 @@ class MenuUploadRequest(BaseModel):
 class OrderStatusUpdateRequest(BaseModel):
     status: str = Field(..., pattern=r"^(new|confirmed|preparing|ready|delivering|completed|cancelled)$")
     payment_status: Optional[str] = Field(default=None, pattern=r"^(pending|paid|failed|refunded)$")
+
 
 @app.post("/admin/onboarding", status_code=201)
 async def onboarding(
@@ -104,12 +123,7 @@ async def admin_update_order_status(
 ) -> dict[str, Any]:
     """Update order and payment status from the admin console."""
     bind_tenant_context(request, tenant)
-    return await update_order_status(
-        tenant_id=tenant,
-        order_id=order_id,
-        status_value=body.status,
-        payment_status=body.payment_status,
-    )
+    return await orders.update_order_status_route(request, order_id, body)
 
 
 @app.get("/admin/{tenant}/dashboard/revenue")
@@ -117,6 +131,26 @@ async def admin_revenue(tenant: str, request: Request, period: str = "day") -> d
     bind_tenant_context(request, tenant)
     require_admin_user(request)
     return await dashboard.revenue(request, period=period)
+
+
+# Auth router (no admin guard — used for login)
+app.include_router(auth.router, prefix="/admin/{tenant}", tags=["Auth"])
+
+# Include CRUD routers under /admin/{tenant} with unified tenant+admin guard
+_admin_dep = Depends(admin_tenant_dependency)
+
+app.include_router(users.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Users"])
+app.include_router(menu.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Menu"])
+app.include_router(orders.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Orders"])
+app.include_router(bookings.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Bookings"])
+app.include_router(ingredients.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Ingredients"])
+app.include_router(loyalty.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Loyalty"])
+app.include_router(settings_route.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Settings"])
+app.include_router(audit.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Audit"])
+app.include_router(onboarding_route.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Onboarding"])
+
+# Static admin panel files (mounted after API routes)
+app.mount("/admin", StaticFiles(directory="static/admin", html=True), name="admin")
 
 
 if __name__ == "__main__":

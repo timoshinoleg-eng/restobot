@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Онбординг — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <h1 style="margin-bottom:20px">Настройка ресторана</h1>
+    <div class="wizard-steps" id="wizardSteps">
+      <div class="wizard-step" data-step="welcome">Приветствие</div>
+      <div class="wizard-step" data-step="menu_upload">Меню</div>
+      <div class="wizard-step" data-step="payment_setup">Оплата</div>
+      <div class="wizard-step" data-step="staff_invite">Персонал</div>
+    </div>
+    <div class="card" id="stepContent" style="min-height:200px"></div>
+    <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn" id="prevBtn" onclick="prevStep()">Назад</button>
+      <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">Далее</button>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/onboarding.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('onboarding');
+    initOnboarding();
+  </script>
+</body>
+</html>

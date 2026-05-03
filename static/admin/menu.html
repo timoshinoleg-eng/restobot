@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Меню — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1>Меню</h1>
+      <button class="btn btn-primary" onclick="openDishModal()">+ Добавить блюдо</button>
+    </div>
+
+    <div class="filters">
+      <select id="catFilter"><option value="">Все категории</option></select>
+      <input id="searchFilter" placeholder="Поиск по названию...">
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Название</th><th>Категория</th><th>Цена</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody id="menuTable"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/menu.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('menu');
+    initMenu();
+  </script>
+</body>
+</html>

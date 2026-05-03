@@ -1,8 +1,11 @@
 """Tenant bootstrap helpers and admin/public MVP operations."""
 
+import logging
+import secrets
 from typing import Any, Optional
 
 from fastapi import HTTPException
+from passlib.context import CryptContext
 
 from shared.config import get_settings
 from shared.database import get_raw_pool
@@ -10,6 +13,8 @@ from shared.jwt_utils import create_access_token
 from shared.sql_utils import format_sql
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 TENANT_SCHEMA_STATEMENTS = [
@@ -17,11 +22,14 @@ TENANT_SCHEMA_STATEMENTS = [
     CREATE TABLE IF NOT EXISTS {}.users (
         id BIGSERIAL PRIMARY KEY,
         external_id VARCHAR(128) UNIQUE,
+        telegram_id VARCHAR(64),
         name VARCHAR(255) NOT NULL,
         phone VARCHAR(20),
         email VARCHAR(255),
         loyalty_points NUMERIC(12,2) NOT NULL DEFAULT 0,
         role VARCHAR(20) NOT NULL DEFAULT 'user',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        password_hash VARCHAR(255),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -53,6 +61,8 @@ TENANT_SCHEMA_STATEMENTS = [
         id BIGSERIAL PRIMARY KEY,
         restaurant_name VARCHAR(255) NOT NULL,
         min_order_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        delivery_radius NUMERIC(12,2) DEFAULT 0,
+        setup_token VARCHAR(64),
         currency VARCHAR(8) NOT NULL DEFAULT 'RUB',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -177,6 +187,63 @@ TENANT_SCHEMA_STATEMENTS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id VARCHAR(64) NOT NULL,
+        user_id BIGINT,
+        action VARCHAR(32) NOT NULL,
+        table_name VARCHAR(64) NOT NULL,
+        record_id BIGINT,
+        old_values JSONB,
+        new_values JSONB,
+        ip_address INET,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_audit_log_tenant_created ON {}.audit_log (tenant_id, created_at DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_audit_log_user ON {}.audit_log (user_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_audit_log_table_action ON {}.audit_log (table_name, action)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.loyalty_settings (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id VARCHAR(64) NOT NULL UNIQUE,
+        bonus_percent NUMERIC(5,2) NOT NULL DEFAULT 5.0,
+        max_discount_percent NUMERIC(5,2) NOT NULL DEFAULT 30.0,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.working_hours (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id VARCHAR(64) NOT NULL,
+        day_of_week INT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+        open_time TIME,
+        close_time TIME,
+        is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (tenant_id, day_of_week)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.onboarding_state (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id VARCHAR(64) NOT NULL UNIQUE,
+        current_step VARCHAR(32) NOT NULL DEFAULT 'welcome',
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 
@@ -281,22 +348,56 @@ async def bootstrap_tenant(
                 admin_phone,
             )
 
-            settings_row = await conn.fetchrow(
+            # Check if admin already has a password hash (first-login already done)
+            existing_admin_hash = await conn.fetchval(
                 format_sql(
-                    """
-                    INSERT INTO {}.restaurant_settings (id, restaurant_name, min_order_amount)
-                    VALUES (1, $1, $2)
-                    ON CONFLICT (id) DO UPDATE
-                    SET restaurant_name = EXCLUDED.restaurant_name,
-                        min_order_amount = EXCLUDED.min_order_amount,
-                        updated_at = NOW()
-                    RETURNING restaurant_name, min_order_amount
-                    """,
+                    "SELECT password_hash FROM {}.users WHERE external_id = $1",
                     tenant_schema,
                 ),
-                restaurant_name,
-                min_order_amount,
+                f"admin:{tenant_id}",
             )
+
+            if existing_admin_hash:
+                # Admin already set up — do not overwrite setup_token
+                setup_token_raw = None
+                settings_row = await conn.fetchrow(
+                    format_sql(
+                        """
+                        INSERT INTO {}.restaurant_settings (id, restaurant_name, min_order_amount, setup_token)
+                        VALUES (1, $1, $2, NULL)
+                        ON CONFLICT (id) DO UPDATE
+                        SET restaurant_name = EXCLUDED.restaurant_name,
+                            min_order_amount = EXCLUDED.min_order_amount,
+                            updated_at = NOW()
+                        RETURNING restaurant_name, min_order_amount
+                        """,
+                        tenant_schema,
+                    ),
+                    restaurant_name,
+                    min_order_amount,
+                )
+            else:
+                # Generate a setup token for first-login protection
+                setup_token_raw = secrets.token_urlsafe(32)
+                setup_token_hash = pwd_context.hash(setup_token_raw)
+                settings_row = await conn.fetchrow(
+                    format_sql(
+                        """
+                        INSERT INTO {}.restaurant_settings (id, restaurant_name, min_order_amount, setup_token)
+                        VALUES (1, $1, $2, $3)
+                        ON CONFLICT (id) DO UPDATE
+                        SET restaurant_name = EXCLUDED.restaurant_name,
+                            min_order_amount = EXCLUDED.min_order_amount,
+                            setup_token = EXCLUDED.setup_token,
+                            updated_at = NOW()
+                        RETURNING restaurant_name, min_order_amount
+                        """,
+                        tenant_schema,
+                    ),
+                    restaurant_name,
+                    min_order_amount,
+                    setup_token_hash,
+                )
 
             table_exists = await conn.fetchval(
                 format_sql("SELECT EXISTS(SELECT 1 FROM {}.tables WHERE number = '1')", tenant_schema)
@@ -311,6 +412,35 @@ async def bootstrap_tenant(
                         tenant_schema,
                     )
                 )
+
+            # Seed default working hours
+            for dow in range(7):
+                await conn.execute(
+                    format_sql(
+                        """
+                        INSERT INTO {}.working_hours
+                        (tenant_id, day_of_week, open_time, close_time, is_closed)
+                        VALUES ($1, $2, '10:00', '22:00', FALSE)
+                        ON CONFLICT (tenant_id, day_of_week) DO NOTHING
+                        """,
+                        tenant_schema,
+                    ),
+                    tenant_id,
+                    dow,
+                )
+
+            # Seed onboarding state
+            await conn.execute(
+                format_sql(
+                    """
+                    INSERT INTO {}.onboarding_state (tenant_id, current_step)
+                    VALUES ($1, 'welcome')
+                    ON CONFLICT (tenant_id) DO NOTHING
+                    """,
+                    tenant_schema,
+                ),
+                tenant_id,
+            )
 
     assert tenant_row is not None
     assert admin_row is not None
@@ -327,6 +457,7 @@ async def bootstrap_tenant(
         "restaurant_name": settings_row["restaurant_name"],
         "admin_user_id": int(admin_row["id"]),
         "admin_token": admin_token,
+        "setup_token": setup_token_raw,
     }
 
 

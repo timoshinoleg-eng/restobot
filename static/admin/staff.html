@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Персонал — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h1>Персонал</h1>
+      <button class="btn btn-primary" onclick="openStaffModal()">+ Добавить</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Имя</th><th>Роль</th><th>Телефон</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody id="staffTable"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/staff.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('staff');
+    loadStaff();
+  </script>
+</body>
+</html>

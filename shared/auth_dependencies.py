@@ -1,6 +1,6 @@
 """Shared authentication and tenant access dependencies."""
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 
 from shared.config import get_settings
 
@@ -59,3 +59,9 @@ def require_bootstrap_access(request: Request) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bootstrap token required",
         )
+
+
+def admin_tenant_dependency(tenant: str, request: Request) -> None:
+    """Bind tenant context and require admin for cloud admin router inclusion."""
+    bind_tenant_context(request, tenant)
+    require_admin_user(request)

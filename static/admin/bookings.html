@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Бронирования — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <h1 style="margin-bottom:20px">Бронирования</h1>
+    <div class="filters">
+      <select id="statusFilter">
+        <option value="">Все статусы</option>
+        <option value="pending">Ожидает</option>
+        <option value="confirmed">Подтверждено</option>
+        <option value="cancelled">Отменено</option>
+      </select>
+      <input type="date" id="dateFilter">
+      <button class="btn btn-primary" onclick="loadBookings()">Обновить</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Стол</th><th>Гость</th><th>Телефон</th><th>Время</th><th>Гости</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody id="bookingsTable"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/bookings.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('bookings');
+    loadBookings();
+  </script>
+</body>
+</html>

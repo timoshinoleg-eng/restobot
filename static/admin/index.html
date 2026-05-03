@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Дашборд — RestoBot Admin</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <main>
+    <h1 style="margin-bottom:20px">Дашборд</h1>
+    <div class="card-grid" id="metrics">
+      <div class="card"><h3>Заказы сегодня</h3><div class="value" id="todayOrders">—</div></div>
+      <div class="card"><h3>Выручка сегодня</h3><div class="value" id="todayRevenue">—</div></div>
+      <div class="card"><h3>Средний чек</h3><div class="value" id="avgCheck">—</div></div>
+      <div class="card"><h3>Активных броней</h3><div class="value" id="activeBookings">—</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px">
+      <h3 style="margin-bottom:12px">Выручка за неделю</h3>
+      <div id="revenueChart" style="display:flex;align-items:flex-end;gap:8px;height:160px"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:12px">Топ-блюда</h3>
+      <table>
+        <thead><tr><th>Блюдо</th><th>Кол-во</th><th>Выручка</th></tr></thead>
+        <tbody id="topDishes"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script>
+    Auth.requireAuth();
+    UI.injectLayout('index');
+    initDashboard();
+  </script>
+</body>
+</html>
