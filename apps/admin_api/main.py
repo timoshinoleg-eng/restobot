@@ -150,7 +150,13 @@ app.include_router(audit.router, prefix="/admin/{tenant}", dependencies=[_admin_
 app.include_router(onboarding_route.router, prefix="/admin/{tenant}", dependencies=[_admin_dep], tags=["Onboarding"])
 
 # Static admin panel files (mounted after API routes)
-app.mount("/admin", StaticFiles(directory="static/admin", html=True), name="admin")
+if os.path.isdir("static/admin"):
+    app.mount("/admin", StaticFiles(directory="static/admin", html=True), name="admin")
+else:
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.warning("static_admin_directory_missing: admin panel will not be served")
 
 
 if __name__ == "__main__":

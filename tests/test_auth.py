@@ -64,6 +64,34 @@ class TestLoginEndpoint:
         assert response.status_code == 200  # nosec B101
         assert "RestoBot Admin" in response.text  # nosec B101
 
+    def test_admin_app_starts_without_static_directory(self) -> None:
+        """Ensure the admin app boots even when static/admin is missing."""
+        import importlib
+        import os as os_module
+
+        real_isdir = os_module.path.isdir
+
+        def fake_isdir(path: str) -> bool:
+            if path == "static/admin":
+                return False
+            return real_isdir(path)
+
+        os_module.path.isdir = fake_isdir  # type: ignore[assignment]
+        try:
+            import apps.admin_api.main as admin_main
+
+            importlib.reload(admin_main)
+            client = TestClient(admin_main.app)
+            # API routes should still work
+            resp = client.get("/admin/test/auth/me")
+            assert resp.status_code == 401  # nosec B101
+            # Static route should 404 (not crash)
+            static_resp = client.get("/admin/login.html")
+            assert static_resp.status_code == 404  # nosec B101
+        finally:
+            os_module.path.isdir = real_isdir  # type: ignore[assignment]
+            importlib.reload(admin_main)
+
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
 class TestFirstLoginFlow:
