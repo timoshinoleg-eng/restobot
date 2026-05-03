@@ -17,8 +17,16 @@ http://:80 {
 		reverse_proxy public:8001
 	}
 
+	handle /admin {
+		reverse_proxy admin:8000
+	}
+
 	handle /admin/* {
 		reverse_proxy admin:8000
+	}
+
+	handle /widget {
+		reverse_proxy public:8001
 	}
 
 	handle /widget/* {
@@ -47,8 +55,26 @@ app.chatbot24.su {
 		format json
 	}
 
+	handle /admin/health {
+		rewrite * /health
+		reverse_proxy admin:8000
+	}
+
+	handle /widget/health {
+		rewrite * /health
+		reverse_proxy public:8001
+	}
+
+	handle /admin {
+		reverse_proxy admin:8000
+	}
+
 	handle /admin/* {
 		reverse_proxy admin:8000
+	}
+
+	handle /widget {
+		reverse_proxy public:8001
 	}
 
 	handle /widget/* {

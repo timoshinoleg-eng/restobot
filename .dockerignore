@@ -12,3 +12,5 @@ key.json
 htmlcov
 .pytest_cache
 .mypy_cache
+frontend/webapp/node_modules
+frontend/webapp/dist
