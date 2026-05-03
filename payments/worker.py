@@ -54,14 +54,43 @@ class PaymentWorker:
                     raise ValueError(f"Invalid payment amount for order {order_id}")
 
                 items_json: list[dict[str, Any]] = json.loads(order["items_json"])
+                item_ids = [
+                    int(item["menu_item_id"])
+                    for item in items_json
+                    if isinstance(item.get("menu_item_id"), int)
+                ]
+                item_name_map: dict[int, str] = {}
+                if item_ids:
+                    menu_rows = await conn.fetch(
+                        format_sql(
+                            "SELECT id, name FROM {}.menu_items WHERE id = ANY($1::bigint[])",
+                            tenant_schema,
+                        ),
+                        item_ids,
+                    )
+                    item_name_map = {int(row["id"]): str(row["name"]) for row in menu_rows}
+
+                receipt_customer = {
+                    key: value
+                    for key, value in {
+                        "email": order.get("user_email", ""),
+                        "phone": order.get("phone", ""),
+                    }.items()
+                    if value
+                }
                 receipt_items = [
                     {
-                        "description": item["name"],
+                        "description": item_name_map.get(
+                            int(item["menu_item_id"]),
+                            f"Позиция #{item['menu_item_id']}",
+                        )[:128],
                         "quantity": item["quantity"],
                         "amount": {
-                            "value": f"{item['price']:.2f}",
+                            "value": f"{float(item['price']):.2f}",
                             "currency": "RUB",
                         },
+                        "payment_mode": "full_payment",
+                        "payment_subject": "commodity",
                         "vat_code": 1,  # 20% VAT
                     }
                     for item in items_json
@@ -78,24 +107,19 @@ class PaymentWorker:
                     },
                     "capture": True,
                     "description": f"Order #{order['order_number']}",
+                    "receipt": {
+                        "customer": receipt_customer,
+                        "items": receipt_items,
+                    },
                     "metadata": {
                         "order_id": str(order_id),
                         "tenant_schema": tenant_schema,
                         "idempotency_key": idempotency_key,
-                        "fiscal": {
-                            "receipt": {
-                                "customer": {
-                                    "email": order.get("user_email", ""),
-                                    "phone": order.get("phone", ""),
-                                },
-                                "items": receipt_items,
-                            }
-                        },
                     },
                 }
 
                 # Create ЮKassa payment (synchronous SDK call wrapped)
-                payment = await asyncio.to_thread(Payment.create, payment_payload)
+                payment = await asyncio.to_thread(Payment.create, payment_payload, idempotency_key)
 
                 await conn.execute(
                     format_sql(

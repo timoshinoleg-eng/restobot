@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import signal
+from datetime import datetime, timezone
 
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.client.default import DefaultBotProperties
@@ -25,8 +26,13 @@ import redis.asyncio as redis
 from aiogram.fsm.storage.redis import RedisStorage
 
 from shared.config import get_settings
-from shared.database import close_raw_pool, init_database
+from shared.database import close_raw_pool, get_raw_pool, init_database
 from shared.rate_limiter import RateLimiter
+from shared.sql_utils import format_sql
+from shared.telegram_user_tenants import (
+    get_tenant_for_telegram_user,
+    set_tenant_for_telegram_user,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -77,12 +83,190 @@ async def _check_rate_limit(message: Message) -> bool:
     return True
 
 
+# ─── Tenant Helpers ────────────────────────────────────────────────
+
+
+def _parse_deep_link_tenant(message: Message) -> str | None:
+    """Extract tenant_id from /start <payload> deep link."""
+    if not message.text:
+        return None
+    # Telegram deep link format: "/start <payload>"
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    return parts[1].strip()
+
+
+def _validate_tenant_id(tenant_id: str) -> bool:
+    """Validate tenant_id using the same rules as schema naming."""
+    if not tenant_id:
+        return False
+    try:
+        settings.get_tenant_schema(tenant_id)
+        return True
+    except ValueError:
+        return False
+
+
+async def _get_user_tenant(state: FSMContext) -> str | None:
+    """Retrieve tenant_id from FSM state data."""
+    data = await state.get_data()
+    return data.get("tenant_id")
+
+
+_MISSING_TENANT_TEXT = (
+    "⚠️ *Не удалось определить ресторан*\n\n"
+    "Для использования бота перейдите по ссылке, "
+    "предоставленной рестораном, или отсканируйте QR-код.\n\n"
+    "Если у вас нет ссылки — свяжитесь с поддержкой: /support"
+)
+
+
+async def _require_tenant(message: Message, state: FSMContext) -> str | None:
+    """Get tenant_id from state, then recover from DB mapping if needed."""
+    tenant_id = await _get_user_tenant(state)
+    if tenant_id is not None:
+        return tenant_id
+
+    if message.from_user is not None:
+        tenant_id = await get_tenant_for_telegram_user(message.from_user.id)
+        if tenant_id is not None and _validate_tenant_id(tenant_id):
+            await state.update_data(tenant_id=tenant_id)
+            return tenant_id
+
+    if tenant_id is None:
+        await message.answer(_MISSING_TENANT_TEXT)
+        return None
+    return tenant_id
+
+
+def _telegram_external_ids(telegram_user_id: int) -> tuple[str, str]:
+    """Return allowed external_id variants for Telegram users."""
+    return (f"tg-{telegram_user_id}", str(telegram_user_id))
+
+
+async def _get_tenant_user_data(tenant_id: str, telegram_user_id: int) -> dict[str, object] | None:
+    """Fetch user profile and aggregate counters from tenant schema."""
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+    external_ids = _telegram_external_ids(telegram_user_id)
+    pool = await get_raw_pool()
+
+    async with pool.acquire() as conn:
+        user_row = await conn.fetchrow(
+            format_sql(
+                """
+                SELECT id, name, phone, email, loyalty_points
+                FROM {}.users
+                WHERE external_id = ANY($1::text[])
+                  AND role = 'user'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                tenant_schema,
+            ),
+            list(external_ids),
+        )
+        if user_row is None:
+            return None
+
+        orders_count = await conn.fetchval(
+            format_sql("SELECT COUNT(*) FROM {}.orders WHERE user_id = $1", tenant_schema),
+            int(user_row["id"]),
+        )
+        last_order_at = await conn.fetchval(
+            format_sql("SELECT MAX(created_at) FROM {}.orders WHERE user_id = $1", tenant_schema),
+            int(user_row["id"]),
+        )
+
+    return {
+        "id": int(user_row["id"]),
+        "name": str(user_row["name"]),
+        "phone": user_row["phone"],
+        "email": user_row["email"],
+        "loyalty_points": float(user_row["loyalty_points"]),
+        "orders_count": int(orders_count or 0),
+        "last_order_at": last_order_at,
+    }
+
+
+async def _anonymize_tenant_user_data(tenant_id: str, telegram_user_id: int) -> bool:
+    """Anonymize a Telegram user in one tenant schema only."""
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+    external_ids = _telegram_external_ids(telegram_user_id)
+    anonym_suffix = datetime.now(tz=timezone.utc).strftime("%Y%m%d%H%M%S")
+    pool = await get_raw_pool()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            user_id = await conn.fetchval(
+                format_sql(
+                    """
+                    SELECT id
+                    FROM {}.users
+                    WHERE external_id = ANY($1::text[])
+                      AND role = 'user'
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    tenant_schema,
+                ),
+                list(external_ids),
+            )
+            if user_id is None:
+                return False
+
+            await conn.execute(
+                format_sql(
+                    """
+                    UPDATE {}.users
+                    SET name = 'Deleted User',
+                        phone = NULL,
+                        email = NULL,
+                        loyalty_points = 0,
+                        external_id = CONCAT('deleted-', id::text, '-', $1),
+                        updated_at = NOW()
+                    WHERE id = $2
+                    """,
+                    tenant_schema,
+                ),
+                anonym_suffix,
+                int(user_id),
+            )
+            await conn.execute(
+                format_sql(
+                    """
+                    UPDATE {}.orders
+                    SET phone = NULL,
+                        address = NULL,
+                        comment = NULL
+                    WHERE user_id = $1
+                    """,
+                    tenant_schema,
+                ),
+                int(user_id),
+            )
+            await conn.execute(
+                format_sql(
+                    """
+                    UPDATE {}.reservations
+                    SET guest_name = 'Deleted User',
+                        guest_phone = 'deleted'
+                    WHERE user_id = $1
+                    """,
+                    tenant_schema,
+                ),
+                int(user_id),
+            )
+
+    return True
+
+
 # ─── Commands ──────────────────────────────────────────────────────
 
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    """Handle /start command."""
+    """Handle /start command with optional deep-link tenant payload."""
     if not await _check_rate_limit(message):
         return
     await state.clear()
@@ -91,8 +275,34 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     if user is None:
         return
 
-    # TODO: Get or create user in database
-    logger.debug("Ensuring DB pool for user %s", user.id)
+    logger.debug("Processing /start for user %s", user.id)
+
+    # Extract tenant from deep link payload
+    tenant_id = _parse_deep_link_tenant(message)
+
+    if tenant_id is None:
+        # No deep link payload — try persisted mapping first
+        tenant_id = await get_tenant_for_telegram_user(user.id)
+        if tenant_id is None:
+            # No mapping — check for configured default (dev/demo only)
+            tenant_id = settings.TELEGRAM_BOT_DEFAULT_TENANT_ID
+            if tenant_id is None:
+                await message.answer(_MISSING_TENANT_TEXT)
+                return
+    elif not _validate_tenant_id(tenant_id):
+        await message.answer(
+            "⚠️ *Некорректная ссылка*\n\n"
+            "Проверьте, что вы перешли по правильной ссылке. "
+            "Если проблема повторяется — свяжитесь с поддержкой: /support"
+        )
+        return
+
+    # Persist mapping in DB for recovery across sessions
+    await set_tenant_for_telegram_user(user.id, tenant_id)
+
+    # Persist tenant in FSM state for the entire session (runtime cache)
+    await state.update_data(tenant_id=tenant_id)
+    logger.info("User %s linked to tenant %s", user.id, tenant_id)
 
     welcome_text = (
         f"👋 Привет, {user.first_name}!\n\n"
@@ -104,16 +314,12 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         f"Начнём? 👇"
     )
 
-    # tenant_id должен приходить из deep-link или базы данных
-    # Используем placeholder для MVP; в production — извлекать из контекста
-    tenant_id = "default"
-
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="🍽️ Посмотреть меню",
-                    web_app=WebAppInfo(url=f"https://app.restobot.ru/{tenant_id}/menu"),
+                    web_app=WebAppInfo(url=f"https://app.chatbot24.su/{tenant_id}/menu"),
                 )
             ],
             [InlineKeyboardButton(text="🤖 AI-рекомендация", callback_data="ai_recommend")],
@@ -129,7 +335,7 @@ async def cmd_help(message: Message, state: FSMContext) -> None:
     """Show help message."""
     if not await _check_rate_limit(message):
         return
-    await state.clear()
+    await state.set_state(None)
     await message.answer(
         "🆘 *Помощь*\n\n"
         "/start — Главное меню\n"
@@ -154,25 +360,50 @@ async def cmd_support(message: Message) -> None:
 
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message) -> None:
-    """Show menu categories."""
+async def cmd_menu(message: Message, state: FSMContext) -> None:
+    """Show menu categories with tenant-aware widget link."""
     if not await _check_rate_limit(message):
         return
-    await message.answer("🍽️ *Наше меню:*\n\nВыберите категорию 👇")
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
+        return
+    await message.answer(
+        "🍽️ *Наше меню:*\n\nВыберите категорию 👇",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🍽️ Открыть меню",
+                        web_app=WebAppInfo(url=f"https://app.chatbot24.su/{tenant_id}/menu"),
+                    )
+                ]
+            ]
+        ),
+    )
 
 
 @router.message(Command("cart"))
-async def cmd_cart(message: Message) -> None:
+async def cmd_cart(message: Message, state: FSMContext) -> None:
     """Show current cart."""
     if not await _check_rate_limit(message):
         return
-    await message.answer("🛒 *Ваша корзина:*\n\n[Cart items here]")
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
+        return
+    await message.answer(
+        f"🛒 *Ваша корзина*\n\n"
+        f"Ресторан: {tenant_id}\n\n"
+        f"[Cart items here]"
+    )
 
 
 @router.message(Command("order"))
 async def cmd_order(message: Message, state: FSMContext) -> None:
-    """Start order flow."""
+    """Start order flow with tenant-aware widget link."""
     if not await _check_rate_limit(message):
+        return
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
         return
     await state.set_state(UserFlow.order_type)
     await message.answer(
@@ -182,30 +413,60 @@ async def cmd_order(message: Message, state: FSMContext) -> None:
                 [InlineKeyboardButton(text="🚚 Доставка", callback_data="order_delivery")],
                 [InlineKeyboardButton(text="🏃 Самовывоз", callback_data="order_pickup")],
                 [InlineKeyboardButton(text="🪑 В зале", callback_data="order_dinein")],
+                [
+                    InlineKeyboardButton(
+                        text="📱 Оформить в приложении",
+                        web_app=WebAppInfo(url=f"https://app.chatbot24.su/{tenant_id}/order"),
+                    )
+                ],
             ]
         ),
     )
 
 
 @router.message(Command("my_data"))
-async def cmd_my_data(message: Message) -> None:
+async def cmd_my_data(message: Message, state: FSMContext) -> None:
     """Show user's personal data (152-ФЗ right to access)."""
     if not await _check_rate_limit(message):
         return
+    if message.from_user is None:
+        return
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
+        return
+
+    user_data = await _get_tenant_user_data(tenant_id, message.from_user.id)
+    if user_data is None:
+        await message.answer(
+            "🔒 *Ваши данные*\n\n"
+            f"Ресторан: {tenant_id}\n"
+            "Профиль не найден. Сначала оформите вход через веб-приложение ресторана."
+        )
+        return
+
+    last_order_at = user_data["last_order_at"]
+    last_order_text = (
+        last_order_at.strftime("%Y-%m-%d %H:%M UTC") if isinstance(last_order_at, datetime) else "нет"
+    )
     await message.answer(
-        "🔒 *Ваши данные:*\n\n"
-        "Имя: [name]\n"
-        "Телефон: +7-XXX-XXX-XX-12\n"
-        "Адрес: [address]\n"
-        "Баллы: [points]\n\n"
-        "[✏️ Изменить] [🗑️ Удалить все данные]"
+        "🔒 *Ваши данные*\n\n"
+        f"Ресторан: {tenant_id}\n"
+        f"Имя: {user_data['name']}\n"
+        f"Телефон: {user_data['phone'] or 'не указан'}\n"
+        f"Email: {user_data['email'] or 'не указан'}\n"
+        f"Баллы: {user_data['loyalty_points']:.2f}\n"
+        f"Заказов: {user_data['orders_count']}\n"
+        f"Последний заказ: {last_order_text}"
     )
 
 
 @router.message(Command("delete_account"))
-async def cmd_delete_account(message: Message) -> None:
+async def cmd_delete_account(message: Message, state: FSMContext) -> None:
     """Right to be forgotten (152-ФЗ Article 14)."""
     if not await _check_rate_limit(message):
+        return
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
         return
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -215,6 +476,7 @@ async def cmd_delete_account(message: Message) -> None:
     )
     await message.answer(
         "⚠️ *Удаление данных*\n\n"
+        f"Ресторан: {tenant_id}\n"
         "Все ваши персональные данные будут удалены. "
         "Заказы сохранятся в анонимизированном виде для бухгалтерии.\n\n"
         "Вы уверены?",
@@ -223,15 +485,32 @@ async def cmd_delete_account(message: Message) -> None:
 
 
 @router.callback_query(F.data == "confirm_delete")
-async def process_delete_account(callback: CallbackQuery) -> None:
+async def process_delete_account(callback: CallbackQuery, state: FSMContext) -> None:
     """Process account deletion."""
     if not isinstance(callback.message, Message):
         await callback.answer()
         return
-    # Call anonymization function
-    # TODO: Implement actual anonymization
+    if callback.from_user is None:
+        await callback.answer("Пользователь не определен")
+        return
+
+    tenant_id = await _require_tenant(callback.message, state)
+    if tenant_id is None:
+        await callback.answer()
+        return
+    deleted = await _anonymize_tenant_user_data(tenant_id, callback.from_user.id)
+    if not deleted:
+        await callback.message.edit_text(
+            "ℹ️ *Данные не найдены*\n\n"
+            f"Ресторан: {tenant_id}\n"
+            "Профиль пользователя не найден, удалять нечего."
+        )
+        await callback.answer()
+        return
     await callback.message.edit_text(
-        "✅ *Данные удалены*\n\n" "Ваши персональные данные полностью удалены."
+        "✅ *Данные удалены*\n\n"
+        f"Ресторан: {tenant_id}\n"
+        "Персональные данные удалены или анонимизированы в рамках текущего ресторана."
     )
     await callback.answer()
 
@@ -260,7 +539,7 @@ async def handle_ai_text(message: Message, state: FSMContext) -> None:
         return
     # TODO: Send query to AI service
     await message.answer("🤖 Думаю над рекомендацией... (заглушка)")
-    await state.clear()
+    await state.set_state(None)
 
 
 @router.message(F.text)
@@ -268,7 +547,7 @@ async def handle_text(message: Message, state: FSMContext) -> None:
     """Handle text messages (default fallback)."""
     if not await _check_rate_limit(message):
         return
-    await state.clear()
+    await state.set_state(None)
     await message.answer(
         "Я не совсем понял 🤔\n\n"
         "Попробуйте:\n"

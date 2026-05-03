@@ -4,7 +4,7 @@ from typing import Awaitable, Callable
 
 from fastapi import Request, Response
 
-from api.routes import bookings, dashboard, ingredients, loyalty, menu, orders, payments, users
+from api.routes import audit, auth, bookings, dashboard, ingredients, loyalty, menu, onboarding, orders, payments, settings as settings_route, users
 from shared.app_factory import create_base_app
 from shared.config import get_settings
 
@@ -31,6 +31,7 @@ async def tenant_middleware(
     return await call_next(request)
 
 
+app.include_router(auth.router, prefix="/api/v1/{tenant}", tags=["Auth"])
 app.include_router(menu.router, prefix="/api/v1/{tenant}", tags=["Menu"])
 app.include_router(orders.router, prefix="/api/v1/{tenant}", tags=["Orders"])
 app.include_router(payments.router, prefix="/api/v1/{tenant}", tags=["Payments"])
@@ -39,6 +40,9 @@ app.include_router(loyalty.router, prefix="/api/v1/{tenant}", tags=["Loyalty"])
 app.include_router(bookings.router, prefix="/api/v1/{tenant}", tags=["Bookings"])
 app.include_router(dashboard.router, prefix="/api/v1/{tenant}", tags=["Dashboard"])
 app.include_router(ingredients.router, prefix="/api/v1/{tenant}", tags=["Ingredients"])
+app.include_router(settings_route.router, prefix="/api/v1/{tenant}", tags=["Settings"])
+app.include_router(audit.router, prefix="/api/v1/{tenant}", tags=["Audit"])
+app.include_router(onboarding.router, prefix="/api/v1/{tenant}", tags=["Onboarding"])
 
 
 if __name__ == "__main__":

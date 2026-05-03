@@ -3,6 +3,7 @@
 
 import json
 import logging
+import re
 import secrets
 from datetime import datetime
 from typing import Any, Optional
@@ -10,6 +11,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
+from shared.audit_utils import log_audit
+from shared.auth_dependencies import require_admin_user
 from shared.config import get_settings
 from shared.database import get_raw_pool
 from shared.sql_utils import format_sql
@@ -44,11 +47,11 @@ class OrderCreateRequest(BaseModel):
     type: str = Field(..., pattern=r"^(delivery|pickup|dine_in|pre_order)$")
     items: list[OrderItemRequest] = Field(..., min_length=1)
     address: Optional[str] = Field(default=None, max_length=500)
-    phone: Optional[str] = Field(default=None, pattern=PHONE_REGEX)
+    phone: Optional[str] = Field(default=None, max_length=20)
     comment: Optional[str] = Field(default=None, max_length=1000)
     scheduled_for: Optional[str] = None
     payment_method: str = Field(default="cash", pattern=r"^(cash|card|online)$")
-    loyalty_points_to_use: Optional[float] = Field(default=0.0, ge=0)
+    loyalty_points_to_use: float = Field(default=0.0, ge=0)
 
     @field_validator("items")
     @classmethod
@@ -56,6 +59,24 @@ class OrderCreateRequest(BaseModel):
         if not v:
             raise ValueError("Order must contain at least one item")
         return v
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        digits = "".join(ch for ch in v if ch.isdigit())
+        if len(digits) == 11 and digits.startswith("8"):
+            normalized = "+7" + digits[1:]
+        elif len(digits) == 10:
+            normalized = "+7" + digits
+        elif len(digits) == 11 and digits.startswith("7"):
+            normalized = "+" + digits
+        else:
+            normalized = v
+        if not re.match(PHONE_REGEX, normalized):
+            raise ValueError("Invalid phone format")
+        return normalized
 
     @field_validator("address")
     @classmethod
@@ -81,6 +102,11 @@ class OrderResponse(BaseModel):
     amount: float
     items: list[OrderItemResponse]
     created_at: str
+
+
+class OrderStatusUpdateRequest(BaseModel):
+    status: str = Field(..., pattern=r"^(new|confirmed|preparing|ready|delivering|completed|cancelled)$")
+    payment_status: Optional[str] = Field(default=None, pattern=r"^(pending|paid|failed|refunded)$")
 
 
 async def _reserve_ingredients(
@@ -336,6 +362,11 @@ async def list_orders(
     request: Request,
     user_id: Optional[int] = None,
     status: Optional[str] = None,
+    order_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """List orders with filters."""
     tenant_schema: str = request.state.tenant_schema
@@ -352,7 +383,77 @@ async def list_orders(
         params.append(status)
         query += f" AND status = ${len(params)}"
 
-    query += " ORDER BY created_at DESC LIMIT 50"
+    if order_type:
+        params.append(order_type)
+        query += f" AND type = ${len(params)}"
+
+    if date_from:
+        params.append(date_from)
+        query += f" AND created_at >= ${len(params)}"
+
+    if date_to:
+        params.append(date_to)
+        query += f" AND created_at <= ${len(params)}"
+
+    params.append(limit)
+    query += f" ORDER BY created_at DESC LIMIT ${len(params)}"
+
+    params.append(offset)
+    query += f" OFFSET ${len(params)}"
 
     rows = await pool.fetch(query, *params)
     return [dict(row) for row in rows]
+
+
+@router.put("/orders/{order_id}/status")
+async def update_order_status_route(
+    request: Request, order_id: int, body: OrderStatusUpdateRequest
+) -> dict[str, Any]:
+    """Update order status. Admin/owner only."""
+    require_admin_user(request)
+    tenant_schema: str = request.state.tenant_schema
+    pool = await get_raw_pool()
+
+    old_row = await pool.fetchrow(
+        format_sql("SELECT * FROM {}.orders WHERE id = $1", tenant_schema),
+        order_id,
+    )
+    if not old_row:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    row = await pool.fetchrow(
+        format_sql(
+            """
+            UPDATE {}.orders
+            SET status = $1,
+                payment_status = COALESCE($2, payment_status),
+                updated_at = NOW()
+            WHERE id = $3
+            RETURNING id, order_number, status, payment_status, amount, created_at
+            """,
+            tenant_schema,
+        ),
+        body.status,
+        body.payment_status,
+        order_id,
+    )
+    assert row is not None
+
+    await log_audit(
+        tenant_schema=tenant_schema,
+        user_id=getattr(request.state, "user_id", None),
+        action="UPDATE_STATUS",
+        table_name="orders",
+        record_id=order_id,
+        old_values={"status": old_row["status"], "payment_status": old_row["payment_status"]},
+        new_values={"status": row["status"], "payment_status": row["payment_status"]},
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {
+        "id": int(row["id"]),
+        "order_number": row["order_number"],
+        "status": row["status"],
+        "payment_status": row["payment_status"],
+        "amount": float(row["amount"]),
+    }

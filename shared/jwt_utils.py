@@ -43,8 +43,8 @@ def create_access_token(
         "tenant_id": tenant_id,
         "role": role,
         "jti": jti,
-        "iat": now,
-        "exp": now + expires_delta,
+        "iat": int(now.timestamp()),
+        "exp": int((now + expires_delta).timestamp()),
     }
     encoded: str = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     return encoded

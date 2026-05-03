@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     )
     TELEGRAM_WEBHOOK_URL: Optional[str] = None
     TELEGRAM_WEBHOOK_SECRET: Optional[str] = None
+    TELEGRAM_BOT_DEFAULT_TENANT_ID: Optional[str] = None
 
     YC_CLOUD_ID: Optional[str] = None
     YC_FOLDER_ID: Optional[str] = None

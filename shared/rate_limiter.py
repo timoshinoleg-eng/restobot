@@ -26,9 +26,12 @@ class RateLimiter:
 
     async def is_allowed(self, user_id: int) -> bool:
         """Check if user is within rate limit."""
+        return await self.is_allowed_key(f"{self.key_prefix}:{user_id}")
+
+    async def is_allowed_key(self, key: str) -> bool:
+        """Check if key is within rate limit."""
         try:
             r = await get_redis()
-            key = f"{self.key_prefix}:{user_id}"
             current = await r.get(key)
             if current is None:
                 await r.setex(key, self.window, 1)
@@ -45,9 +48,12 @@ class RateLimiter:
 
     async def remaining(self, user_id: int) -> int:
         """Return remaining allowed requests in current window."""
+        return await self.remaining_key(f"{self.key_prefix}:{user_id}")
+
+    async def remaining_key(self, key: str) -> int:
+        """Return remaining allowed requests for key."""
         try:
             r = await get_redis()
-            key = f"{self.key_prefix}:{user_id}"
             current = await r.get(key)
             if current is None:
                 return self.limit
