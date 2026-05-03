@@ -73,3 +73,12 @@ poetry.lock
 # Deployment artifacts
 .deploy_tag
 .rollback.env
+
+# Node / Frontend
+node_modules/
+frontend/webapp/dist/
+frontend/webapp/node_modules/
+*.tsbuildinfo
+
+*.tar.gz
+
