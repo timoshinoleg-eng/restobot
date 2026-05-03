@@ -12,6 +12,7 @@ RestoBot - backend/API для ресторанного MVP на FastAPI, Postgre
 - одноразовый migration runner в `scripts/migrate_cloud.py`
 - smoke-тест после деплоя в `scripts/smoke_cloud.py`
 - seed-скрипт для demo tenant в `scripts/seed_demo_tenant.py`
+- CLI-импорт меню для нового tenant в `scripts/upload_menu.py`
 
 ## Локальный запуск
 
@@ -47,6 +48,27 @@ poetry run python scripts/seed_demo_tenant.py --print-menu-template
 ```
 
 Шаблон также сохранён в [MENU_UPLOAD_TEMPLATE.json](<C:/Users/Имярек/Downloads/restobot-main/MENU_UPLOAD_TEMPLATE.json>).
+
+## Новый магазин: provisioning и загрузка меню
+
+Production-контур рассчитан на CLI, а не на постоянный HTTP bootstrap:
+
+```bash
+poetry run python scripts/provision_tenant.py \
+  --tenant-id bistro_01 \
+  --restaurant-name "Bistro 01" \
+  --admin-name "Owner Name" \
+  --admin-email "owner@bistro.ru" \
+  --admin-phone "+79990000000"
+```
+
+После этого меню и цены можно залить из JSON-шаблона:
+
+```bash
+poetry run python scripts/upload_menu.py \
+  --tenant-id bistro_01 \
+  --menu-file MENU_UPLOAD_TEMPLATE.json
+```
 
 ## Деплой в Yandex Cloud
 

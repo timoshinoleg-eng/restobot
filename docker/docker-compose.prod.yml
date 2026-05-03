@@ -9,6 +9,7 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/webapp/dist:/srv/webapp:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -30,6 +31,7 @@ services:
 
   admin:
     image: ${ADMIN_IMAGE}
+    command: ["python", "scripts/run_admin.py"]
     restart: unless-stopped
     environment:
       PORT: "8000"
@@ -55,7 +57,7 @@ services:
     networks:
       - restobot
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -74,6 +76,7 @@ services:
 
   public:
     image: ${PUBLIC_IMAGE}
+    command: ["python", "scripts/run_public.py"]
     restart: unless-stopped
     environment:
       PORT: "8001"
@@ -97,7 +100,7 @@ services:
     networks:
       - restobot
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health || exit 1"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -108,6 +111,50 @@ services:
           memory: 512M
         reservations:
           memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  bot:
+    image: ${ADMIN_IMAGE}
+    command: ["python", "-m", "bot.main"]
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      LOG_LEVEL: INFO
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET}
+      YC_FOLDER_ID: ${YC_FOLDER_ID}
+      YC_IAM_TOKEN: ${YC_IAM_TOKEN}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_BOT_DEFAULT_TENANT_ID: ${TELEGRAM_BOT_DEFAULT_TENANT_ID:-}
+      YC_OBJECT_STORAGE_BUCKET: ${YC_OBJECT_STORAGE_BUCKET}
+      YC_OBJECT_STORAGE_ENDPOINT: ${YC_OBJECT_STORAGE_ENDPOINT}
+    networks:
+      - restobot
+    healthcheck:
+      disable: true
+    depends_on:
+      - admin
+      - public
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 96M
     logging:
       driver: "json-file"
       options:

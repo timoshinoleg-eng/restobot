@@ -17,7 +17,7 @@ from shared.database import (
     close_database,
     init_database,
 )
-from shared.jwt_utils import verify_access_token
+from shared.jwt_utils import is_revoked, verify_access_token
 from shared.logging_config import configure_logging, reset_request_id, set_request_id
 from shared.redis_client import check_redis_health, close_redis
 
@@ -79,7 +79,7 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.ENVIRONMENT != "production" else ["https://app.restobot.ru", "https://t.me"],
+        allow_origins=["*"] if settings.ENVIRONMENT != "production" else ["https://app.chatbot24.su", "https://t.me"],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
@@ -118,7 +118,7 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' https://app.restobot.ru; "
+            "default-src 'self'; script-src 'self' https://app.chatbot24.su; "
             "style-src 'self' 'unsafe-inline'"
         )
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -130,14 +130,21 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         request.state.auth_error = None
+        token: str | None = None
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
+        elif not token:
+            token = request.cookies.get("access_token")
+        if token:
             payload = verify_access_token(token)
             if payload:
-                request.state.user_id = payload.user_id
-                request.state.user_role = payload.role
-                request.state.token_tenant_id = payload.tenant_id
+                if await is_revoked(payload.jti):
+                    request.state.auth_error = "Token revoked"
+                else:
+                    request.state.user_id = payload.user_id
+                    request.state.user_role = payload.role
+                    request.state.token_tenant_id = payload.tenant_id
             else:
                 request.state.auth_error = "Invalid bearer token"
         return await call_next(request)

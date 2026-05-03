@@ -1,0 +1,61 @@
+name: Integration Staging
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: restobot
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: restobot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install poetry
+          poetry install --no-root
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://restobot:password@localhost:5432/restobot
+          JWT_SECRET: test_secret_key_min_32_chars_here
+        run: poetry run alembic upgrade head
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://restobot:password@localhost:5432/restobot
+          REDIS_URL: redis://localhost:6379/0
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || 'test' }}
+          YC_FOLDER_ID: test
+          YOOKASSA_SHOP_ID: test
+          YOOKASSA_SECRET_KEY: test
+          JWT_SECRET: test_secret_key_min_32_chars_here
+          YC_OBJECT_STORAGE_BUCKET: test
+        run: poetry run pytest tests/ -m integration -q --tb=short -v 2>&1 | tee integration-log.txt
+      - name: Upload integration logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ github.run_id }}
+          path: integration-log.txt

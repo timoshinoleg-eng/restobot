@@ -100,4 +100,5 @@ testpaths = ["tests"]
 addopts = "--cov=. --cov-report=term-missing"
 markers = [
     "cloud: tests that exercise a deployed cloud environment",
+    "integration: tests that require real database and redis",
 ]

@@ -291,6 +291,42 @@ poetry run python scripts/seed_demo_tenant.py --tenant-id demo
 
 Скрипт создаёт или обновляет demo tenant и записывает каноническое demo menu. Для ручной подготовки клиентского меню можно использовать [MENU_UPLOAD_TEMPLATE.json](<C:/Users/Имярек/Downloads/restobot-main/MENU_UPLOAD_TEMPLATE.json>).
 
+### Сброс demo tenant в чистое состояние
+
+Для повторных демо-показов используйте `--reset` (безопасно только для `demo`):
+
+```powershell
+poetry run python scripts/seed_demo_tenant.py --tenant-id demo --reset
+```
+
+**Reset contract** (что происходит при `--reset`):
+
+- **Очищается:**
+  - `orders` — все заказы
+  - `loyalty_transactions` — все транзакции лояльности
+  - `reservations` — все бронирования
+  - `stock_movements` — все складские движения
+  - `payment_dlq` — dead letter queue
+  - `users` с `role = 'user'` — widget-пользователи
+  - `loyalty_points` сбрасывается в `0` у оставшихся admin-аккаунтов
+
+- **Сохраняется:**
+  - `users` с `role = 'admin'` — admin и его credentials/token
+  - `restaurant_settings` — настройки ресторана
+  - `menu_categories` / `menu_items` — пересоздаются через `replace_menu`
+  - `ingredients`, `recipes`, `tables`, `menu_item_modifiers`, `modifier_options` — справочники
+
+- **Безопасность:**
+  - `--reset` по умолчанию работает только для `tenant_id = "demo"`
+  - Для сброса других tenant'ов требуется явный флаг `--force-reset`
+
+На production VM (Docker Compose):
+
+```bash
+docker cp ./scripts/seed_demo_tenant.py restobot-admin-1:/tmp/seed_demo_tenant.py
+docker exec restobot-admin-1 python3 /tmp/seed_demo_tenant.py --tenant-id demo --reset
+```
+
 ## 11. Краткий операторский прогон
 
 Минимальный порядок действий для пилота:

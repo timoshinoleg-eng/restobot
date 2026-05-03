@@ -68,7 +68,7 @@ jobs:
         run: |
           pip install poetry
           poetry install --no-root
-      - name: Run tests
+      - name: Run unit tests
         env:
           DATABASE_URL: postgresql+asyncpg://restobot:password@localhost:5432/restobot
           REDIS_URL: redis://localhost:6379/0
@@ -78,7 +78,7 @@ jobs:
           YOOKASSA_SECRET_KEY: test
           JWT_SECRET: test_secret_key_min_32_chars_here
           YC_OBJECT_STORAGE_BUCKET: test
-        run: poetry run pytest tests/ -q --cov=. --cov-report=xml
+        run: poetry run pytest tests/ -m "not integration" -q --cov=. --cov-report=xml
 
   build:
     runs-on: ubuntu-latest
