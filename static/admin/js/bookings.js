@@ -13,18 +13,45 @@ async function loadBookings() {
     tbody.innerHTML = '';
     rows.forEach(b => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${b.table_number || b.table_id}</td>
-        <td>${b.guest_name}</td>
-        <td>${b.guest_phone}</td>
-        <td>${b.start_time ? b.start_time.replace('T', ' ').substring(0, 16) : ''}</td>
-        <td>${b.guests_count}</td>
-        <td>${b.status}</td>
-        <td>
-          <button class="btn btn-sm btn-primary" onclick="openBookingModal(${b.id})">Ред.</button>
-          <button class="btn btn-sm btn-danger" onclick="cancelBooking(${b.id})">Отмена</button>
-        </td>
-      `;
+
+      const tdTable = document.createElement('td');
+      tdTable.textContent = b.table_number || b.table_id;
+      tr.appendChild(tdTable);
+
+      const tdName = document.createElement('td');
+      tdName.textContent = b.guest_name;
+      tr.appendChild(tdName);
+
+      const tdPhone = document.createElement('td');
+      tdPhone.textContent = b.guest_phone;
+      tr.appendChild(tdPhone);
+
+      const tdTime = document.createElement('td');
+      tdTime.textContent = b.start_time ? b.start_time.replace('T', ' ').substring(0, 16) : '';
+      tr.appendChild(tdTime);
+
+      const tdGuests = document.createElement('td');
+      tdGuests.textContent = b.guests_count;
+      tr.appendChild(tdGuests);
+
+      const tdStatus = document.createElement('td');
+      tdStatus.textContent = b.status;
+      tr.appendChild(tdStatus);
+
+      const tdActions = document.createElement('td');
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn btn-sm btn-primary';
+      btnEdit.textContent = 'Ред.';
+      btnEdit.onclick = () => openBookingModal(b.id);
+      tdActions.appendChild(btnEdit);
+
+      const btnCancel = document.createElement('button');
+      btnCancel.className = 'btn btn-sm btn-danger';
+      btnCancel.textContent = 'Отмена';
+      btnCancel.onclick = () => cancelBooking(b.id);
+      tdActions.appendChild(btnCancel);
+
+      tr.appendChild(tdActions);
       tbody.appendChild(tr);
     });
   } catch (e) {
@@ -36,9 +63,9 @@ async function openBookingModal(id) {
   try {
     const b = await API.get('/reservations/' + id);
     UI.openModal('Бронирование #' + id, `
-      <div class="form-group"><label>Имя</label><input id="bName" value="${b.guest_name}"></div>
-      <div class="form-group"><label>Телефон</label><input id="bPhone" value="${b.guest_phone}"></div>
-      <div class="form-group"><label>Гостей</label><input id="bGuests" type="number" value="${b.guests_count}"></div>
+      <div class="form-group"><label>Имя</label><input id="bName" value="${UI.escapeHtml(b.guest_name)}"></div>
+      <div class="form-group"><label>Телефон</label><input id="bPhone" value="${UI.escapeHtml(b.guest_phone)}"></div>
+      <div class="form-group"><label>Гостей</label><input id="bGuests" type="number" value="${UI.escapeHtml(b.guests_count)}"></div>
       <div class="form-group"><label>Статус</label>
         <select id="bStatus">
           <option value="pending" ${b.status==='pending'?'selected':''}>Ожидает</option>

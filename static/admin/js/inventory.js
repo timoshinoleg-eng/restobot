@@ -23,17 +23,43 @@ function renderInventory(rows) {
   rows.forEach(r => {
     const low = parseFloat(r.current_stock) < parseFloat(r.min_stock);
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${r.name}</td>
-      <td>${r.unit}</td>
-      <td style="color:${low?'var(--danger)':'inherit'};font-weight:${low?'700':'400'}">${r.current_stock}</td>
-      <td>${r.reserved_stock}</td>
-      <td>${r.min_stock}</td>
-      <td>
-        <button class="btn btn-sm btn-success" onclick="openStockModal(${r.id})">+ Приход</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteIngredient(${r.id})">Удал.</button>
-      </td>
-    `;
+
+    const tdName = document.createElement('td');
+    tdName.textContent = r.name;
+    tr.appendChild(tdName);
+
+    const tdUnit = document.createElement('td');
+    tdUnit.textContent = r.unit;
+    tr.appendChild(tdUnit);
+
+    const tdStock = document.createElement('td');
+    tdStock.textContent = r.current_stock;
+    tdStock.style.color = low ? 'var(--danger)' : 'inherit';
+    tdStock.style.fontWeight = low ? '700' : '400';
+    tr.appendChild(tdStock);
+
+    const tdReserved = document.createElement('td');
+    tdReserved.textContent = r.reserved_stock;
+    tr.appendChild(tdReserved);
+
+    const tdMin = document.createElement('td');
+    tdMin.textContent = r.min_stock;
+    tr.appendChild(tdMin);
+
+    const tdActions = document.createElement('td');
+    const btnAdd = document.createElement('button');
+    btnAdd.className = 'btn btn-sm btn-success';
+    btnAdd.textContent = '+ Приход';
+    btnAdd.onclick = () => openStockModal(r.id);
+    tdActions.appendChild(btnAdd);
+
+    const btnDel = document.createElement('button');
+    btnDel.className = 'btn btn-sm btn-danger';
+    btnDel.textContent = 'Удал.';
+    btnDel.onclick = () => deleteIngredient(r.id);
+    tdActions.appendChild(btnDel);
+
+    tr.appendChild(tdActions);
     tbody.appendChild(tr);
   });
 }
