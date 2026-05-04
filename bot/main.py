@@ -25,6 +25,7 @@ from aiohttp import web
 import redis.asyncio as redis
 from aiogram.fsm.storage.redis import RedisStorage
 
+from ai.rag_engine import RAGEngine
 from shared.config import get_settings
 from shared.database import close_raw_pool, get_raw_pool, init_database
 from shared.rate_limiter import RateLimiter
@@ -36,6 +37,7 @@ from shared.telegram_user_tenants import (
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+rag_engine = RAGEngine()
 
 # Initialize bot and dispatcher
 bot = Bot(
@@ -537,8 +539,25 @@ async def handle_ai_text(message: Message, state: FSMContext) -> None:
     """Handle text in AI recommendation state."""
     if not await _check_rate_limit(message):
         return
-    # TODO: Send query to AI service
-    await message.answer("🤖 Думаю над рекомендацией... (заглушка)")
+    tenant_id = await _require_tenant(message, state)
+    if tenant_id is None:
+        return
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+
+    await message.answer("🤖 Думаю над рекомендацией...")
+    try:
+        result = await rag_engine.recommend(
+            tenant_schema=tenant_schema,
+            tenant_id=tenant_id,
+            query=message.text or "",
+            user_id=message.from_user.id if message.from_user else None,
+        )
+        await message.answer(result["recommendation"], parse_mode=ParseMode.MARKDOWN)
+    except Exception as exc:
+        logger.exception("AI recommendation failed: %s", exc)
+        await message.answer(
+            "🤖 Не удалось получить рекомендацию. Попробуйте позже или выберите блюда из /menu."
+        )
     await state.set_state(None)
 
 

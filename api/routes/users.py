@@ -68,6 +68,33 @@ class UserUpdate(BaseModel):
         return normalized
 
 
+@router.get("/users/{user_id}")
+async def get_user(request: Request, user_id: int) -> dict[str, Any]:
+    """Get a single user by ID. Admin/owner only."""
+    require_admin_user(request)
+    tenant_schema: str = request.state.tenant_schema
+    pool = await get_raw_pool()
+
+    row = await pool.fetchrow(
+        format_sql(
+            """
+            SELECT id, external_id, telegram_id, name, phone, email, role, is_active, loyalty_points, created_at
+            FROM {}.users
+            WHERE id = $1
+            """,
+            tenant_schema,
+        ),
+        user_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    d = dict(row)
+    d["tenant_id"] = tenant_schema.removeprefix("tenant_")
+    if hasattr(d.get("created_at"), "isoformat"):
+        d["created_at"] = d["created_at"].isoformat()
+    return d
+
+
 @router.get("/users")
 async def list_users(
     request: Request,
