@@ -94,6 +94,7 @@ class TestLoginEndpoint:
 
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestFirstLoginFlow:
     """Test first login with setup_token and subsequent normal login."""
 
@@ -250,6 +251,7 @@ class TestFirstLoginFlow:
 
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestLoginRateLimiter:
     """Test that repeated failed logins trigger rate limit."""
 

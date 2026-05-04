@@ -53,6 +53,7 @@ class TestOnboardingStatusUpdateValidation:
 
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestSettingsIntegration:
     """Integration tests for settings and working hours."""
 
@@ -171,6 +172,7 @@ class TestSettingsIntegration:
 
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestOnboardingIntegration:
     """Integration tests for onboarding endpoints."""
 
@@ -258,6 +260,7 @@ class TestOnboardingIntegration:
 
 
 @pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestAuditIntegration:
     """Integration tests for audit log endpoint."""
 

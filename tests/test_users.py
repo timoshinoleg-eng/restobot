@@ -58,7 +58,7 @@ class TestUserUpdateValidation:
             UserUpdate(phone="bad")
 
 
-@pytest.mark.skipif(not HAS_DB, reason="Requires database")
+@pytest.mark.integration
 class TestUsersIntegration:
     """Integration tests for users CRUD via admin API."""
 

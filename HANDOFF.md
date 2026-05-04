@@ -1,346 +1,245 @@
-# RestoBot Handoff Packet
+# RestoBot Handoff
 
-Дата: 2026-04-29
-Назначение: стартовый контекст для нового чата / нового исполнителя без потери текущего состояния
+Дата: 2026-05-04
+Репозиторий: `C:\Users\Имярек\Downloads\restobot-main`
+Ветка: `codex/yc-mvp-deploy`
+Состояние: `ahead 25`, working tree clean (единственное локальное изменение — этот `HANDOFF.md`)
 
-## 1. Проект
+## 1. Что это за срез
 
-- Проект: `RestoBot`
-- Репозиторий: `restobot`
-- Рабочая ветка: `codex/yc-mvp-deploy`
-- Основной сайт: `chatbot24.su`
-- Новое направление: Telegram-first SaaS для ресторанов / кафе / доставки
-- Канал заявок: Telegram
-- Цель: быстро собрать коммерческий MVP и подготовить пилот
+Это актуальный handoff для продолжения работы без повторной раскопки проекта.
+Ниже только текущее инженерное состояние, подтверждённые точки и ближайший pragmatic next step.
 
-## 2. Общая рамка
+## 2. Текущий статус продукта и платформы
 
-Текущий приоритет:
+Подтверждено:
 
-1. вывести `RestoBot` на пилотный MVP;
-2. подготовить вторую страницу/оффер на `chatbot24.su`;
-3. не раздувать scope;
-4. не откатывать уже сделанный cloud/security фундамент.
+- production и demo/pilot контуры поднимались и проверялись;
+- tenant provisioning идёт через CLI, не через HTTP bootstrap;
+- Telegram WebApp обновлён;
+- online payment flow через YooKassa доведён до рабочего backend/frontend контракта;
+- admin backoffice MVP добавлен и заведён в репозиторий;
+- setup token lifecycle стабилизирован;
+- unit и integration CI разделены;
+- integration suite под real Postgres/Redis добавлен.
 
-Подход:
+## 3. Что уже есть в коде
 
-- pilot-first;
-- минимально достаточный продуктовый контур;
-- Telegram-first lead flow;
-- российский cloud-контур;
-- первый месяц бесплатно как входной offer.
+### CLI provisioning
 
-## 3. Что уже сделано в репозитории
+Основные скрипты:
 
-### 3.1 Cloud / Infra / Deploy
+- `scripts/provision_tenant.py`
+- `scripts/upload_menu.py`
+- `scripts/seed_demo_tenant.py`
+- `scripts/set_admin_password.py`
+- `scripts/smoke_webapp.py`
 
-Уже добавлены или изменены:
+### Admin Backoffice MVP
 
-- Terraform stack для Yandex Cloud:
-  - Serverless Containers
-  - API Gateway
-  - Lockbox
-  - Managed PostgreSQL
-  - Managed Redis
-  - Object Storage backend
-- русские `README.md` и `DEPLOYMENT.md`
-- bootstrap backend под Terraform state
-- GitHub Actions deploy workflow
-- migration runner
-- smoke test script
+Подтверждённые возможности:
 
-### 3.2 Cloud app layer
+- cookie-based auth;
+- first-login через `setup_token`;
+- JWT revocation on logout;
+- audit log;
+- onboarding / settings / users / menu / orders / bookings / inventory / loyalty pages;
+- static admin panel;
+- graceful startup admin app без `static/admin`.
 
-Добавлены cloud entrypoint'ы:
+Ключевые admin роуты:
+
+- `api/routes/auth.py`
+- `api/routes/audit.py`
+- `api/routes/onboarding.py`
+- `api/routes/settings.py`
+- `api/routes/users.py`
+
+Admin app entrypoint:
 
 - `apps/admin_api/main.py`
-- `apps/public_api/main.py`
 
-Legacy surface сохранён:
+### WebApp / Public contour
 
-- `api/main.py`
+Подтверждено:
 
-### 3.3 Security / runtime hardening
+- улучшен дизайн;
+- добавлена маска телефона;
+- frontend/backend flow оплаты синхронизирован;
+- exact-match routing для `/widget` и `/admin` в Caddy исправлен.
 
-Уже внесён пакет критичных правок:
+### Infra / deploy
 
-- onboarding защищён;
-- widget order endpoints требуют auth;
-- публичное создание tenant schema из widget-flow убрано;
-- webhook route добавлен;
-- `.dockerignore` добавлен;
-- Docker runtime переведён на non-root + no shell launch;
-- request_id добавлен в 500 responses;
-- Redis TLS / deploy hardening частично проведены.
+Подтверждено:
 
-### 3.4 Tests
+- `.github/workflows/ci.yml` оставлен для unit/in-memory;
+- `.github/workflows/integration-staging.yml` запускает migrations + integration tests на postgres/redis service containers;
+- `docker/Caddyfile` исправлен для `/admin`, `/widget`, `/admin/health`, `/widget/health`;
+- `.dockerignore` исключает `frontend/webapp/node_modules` и `frontend/webapp/dist`.
 
-Добавлены cloud-facing тесты:
+## 4. Последние значимые коммиты
 
-- `tests/test_cloud_apps.py`
+Последние подтверждённые коммиты:
 
-Локально проходили:
+- `0a11d14` `fix(admin): graceful startup when static/admin is missing; add regression test`
+- `336b68b` `fix(deploy): add /admin /widget exact-match routes to Caddy; ignore frontend build artifacts in Docker`
+- `64a93cc` `test: cover admin users CRUD, settings, onboarding, audit, auth rate limiter`
+- `ee9b0f6` `test: add admin auth, e2e, integration smoke, bot tenant routing tests`
+- `7afd5ce` `feat(ci,deploy): split unit/integration CI, docker updates, runbook docs`
+- `ce5651b` `feat(api,bot,payments): extend routes, bot tenant routing, payments flow`
+- `475906b` `feat(frontend): add Telegram webapp source and deployment scripts`
+- `ac5b2a8` `feat(admin): add admin backoffice MVP — auth, audit, settings, onboarding, static panel`
 
-- cloud app tests;
-- часть targeted pytest suites;
-- compileall по изменённым Python-модулям.
+## 5. Последняя подтверждённая проверка
 
-## 4. Что сейчас в рабочем дереве
+Фактически проверено в этом чате:
 
-Важно: не всё ещё оформлено в коммит.
+- `git status` clean;
+- ветка `ahead 25`;
+- `tests/test_users.py` и `tests/test_admin_routes.py` на месте;
+- `tests/test_auth.py` расширен regression coverage;
+- `apps/admin_api/main.py` не падает без `static/admin`;
+- `docker/Caddyfile` содержит exact-match handlers для `/admin` и `/widget`;
+- `.dockerignore` режет frontend build artifacts.
 
-В рабочем дереве есть:
+Целевые локальные прогоны, подтверждённые здесь:
 
-- незакоммиченные технические изменения по:
-  - cloud/security/runtime/deploy
-  - Redis TLS
-  - immutable image flow
-  - plan/apply hardening
-  - bootstrap token flow
-- незакоммиченные продуктовые документы спринта
+- `pytest tests/ -o addopts="" -m "not integration" -q --tb=short`
+  - результат: **`163 passed, 8 skipped, 28 deselected`** (полный unit suite)
+- `pytest tests/test_auth.py tests/test_users.py tests/test_admin_routes.py -q`
+  - результат: `23 passed, 25 skipped`
+- `pytest tests/test_auth.py -q`
+  - результат: `7 passed, 9 skipped`
 
-Перед любым новым коммитом нужно:
+Из пользовательского статуса:
 
-1. осознанно разделить product docs и technical changes;
-2. не потерять текущее состояние ветки;
-3. не перетирать существующие правки без просмотра diff.
+- **unit suite:** `163 passed, 8 skipped, 28 deselected` (актуальный прогон; deselected = integration tests)
+- **integration:** локально недоступен (нет Postgres/Redis)
 
-## 5. Продуктовые артефакты, уже подготовленные в текущем чате
+Важно: полный integration suite локально зависит от доступных Postgres/Redis. В текущем окружении они не запущены — integration path не прогонялся.
 
-Созданы:
+## 6. Миграции и данные
 
-- `MVP_SCOPE.md`
-- `SPRINT_BACKLOG.md`
-- `SPRINT_EXECUTION_PLAN.md`
-- `POSITIONING_FINAL.md`
-- `LANDING_BRIEF_FINAL.md`
-- `HANDOFF.md`
+Новые миграции:
 
-### 5.1 Назначение файлов
+- `migrations/versions/004_add_telegram_user_tenants.py`
+- `migrations/versions/005_add_admin_tables.py`
 
-`MVP_SCOPE.md`
+С setup token lifecycle есть важные инварианты:
 
-- фиксирует продуктовую рамку пилота;
-- определяет, что входит и не входит в MVP;
-- задаёт definition of done.
+- `bootstrap_tenant()` не должен перегенерировать token, если у админа уже есть `password_hash`;
+- `scripts/set_admin_password.py` не должен трогать `setup_token`, если пароль уже существовал.
 
-`SPRINT_BACKLOG.md`
+## 7. Что уже покрыто тестами
 
-- backlog на 2 недели;
-- приоритеты `must / should / later`;
-- владельцы по потокам.
+### Auth
 
-`SPRINT_EXECUTION_PLAN.md`
+Покрыто:
 
-- execution plan на 14 дней;
-- роли Codex / Deep Research / Swarm;
-- ожидаемые артефакты;
-- правила принятия внешних результатов.
+- first-login через `setup_token`;
+- отказ без token;
+- отказ с неверным token;
+- subsequent login по паролю;
+- `/auth/me`;
+- logout + cookie clearing;
+- `401` после logout;
+- login rate limiter;
+- startup admin app без static directory.
 
-`POSITIONING_FINAL.md`
+### Users
 
-- заготовка для финального позиционирования;
-- будет заполнена после приёмки Deep Research.
+Покрыто:
 
-`LANDING_BRIEF_FINAL.md`
+- Pydantic validation `UserCreate/UserUpdate`;
+- phone normalization;
+- role validation;
+- list/create/update/soft-delete;
+- `404` / `422` scenarios.
 
-- заготовка для финального брифа второй страницы;
-- будет заполнена после приёмки Swarm и Deep Research.
+### Admin routes
 
-## 6. Внешние сервисы и их роль
-
-### 6.1 Kimi Deep Research
-
-Уже запущен.
-
-От него ожидаются:
-
-- `RESTOBOT_COMPETITOR_MAP.md`
-- `RESTOBOT_JTBD_AND_BUYER.md`
-- `RESTOBOT_GTM_RECOMMENDATION.md`
-
-Назначение:
-
-- restaurant competitor map;
-- JTBD / buyer analysis;
-- offer / pricing / CTA guidance;
-- `152-ФЗ` positioning guidance.
-
-### 6.2 Kimi Swarm
-
-Уже запущен.
-
-От него ожидаются:
-
-- `LANDING_VARIANT_A.md`
-- `LANDING_VARIANT_B.md`
-- `LANDING_VARIANT_C.md`
-- `SALES_FAQ.md`
-- `OBJECTION_HANDLING.md`
-- `DEMO_SCRIPT.md`
-- `CUSTOMER_ONBOARDING_CHECKLIST.md`
-- `MENU_UPLOAD_TEMPLATE.json`
-- `PILOT_LAUNCH_CHECKLIST.md`
-- `MENU_MODULE_MVP_EXTRACTION.md`
-
-Назначение:
-
-- landing drafts;
-- sales materials;
-- onboarding drafts;
-- extraction полезного из внешнего menu-module.
-
-## 7. Внешний menu-module от Swarm
-
-Был отдельно изучен пакет файлов из каталога:
-
-- `C:\Users\Имярек\Downloads\Kimi_Agent_Создание модуля Рестобот\...`
-
-Ключевой вывод:
-
-- это не готовый merge-ready модуль;
-- это хорошо проработанный доменный проект `menu` под другую архитектурную раскладку;
-- полезен как reference/backlog source;
-- не должен интегрироваться целиком в `restobot` без адаптации.
-
-Главные замечания:
-
-- `router.py` — скелет с `...`, не рабочая реализация;
-- `menu_handlers.py` вызывает методы, которых нет в `service.py`;
-- тесты частично демонстрационные и не доказывают production readiness;
-- архитектура ориентирована на `app/modules/menu/*`, которой в реальном `restobot` нет.
-
-Практический вывод:
-
-- брать только MVP-полезные сущности и business rules;
-- не тащить весь модуль как есть.
-
-## 8. Текущее MVP-решение
-
-Рабочий MVP scope уже зафиксирован.
-
-В MVP входят:
-
-- onboarding ресторана;
-- загрузка меню;
-- просмотр меню;
-- создание заказа;
-- обновление статуса заказа;
-- demo tenant;
-- smoke after deploy;
-- Telegram CTA.
-
-В MVP не входят:
-
-- variants/modifiers как развитый продуктовый слой;
-- AI-описания;
-- booking;
-- waiter call;
-- склад;
-- сложная аналитика;
-- полный aiogram catalog UX.
-
-## 9. Текущее состояние исследований
-
-Было отдельно изучено исследование:
-
-- `OPERATION_ MARKET BREACH — Board-Level Intelligence Brief.docx`
-
-Вывод:
-
-- как общий chatbot SaaS market baseline — полезно;
-- для `RestoBot` как restaurant-specific GTM — недостаточно;
-- нужен не полный перезапуск, а узкий дополнительный deep research round по ресторанной вертикали.
-
-Предварительно признанные ближайшие конкуренты:
-
-- `ChatFood`
-- `CafeBotum`
-- `Smartbot Pro`
-
-На дополнительной проверке:
-
-- `Nyambot`
-- `BorisBot` как adjacent competitor
-
-## 10. Что нужно делать дальше
-
-Следующий шаг после открытия нового чата:
-
-1. восстановить рабочую картину по `HANDOFF.md`;
-2. принять артефакты `Deep Research`;
-3. принять артефакты `Swarm`;
-4. заполнить:
-   - `POSITIONING_FINAL.md`
-   - `LANDING_BRIEF_FINAL.md`
-5. после этого продолжить:
-   - продуктовую сборку второй страницы;
-   - технический фронт `restobot`;
-   - при необходимости подготовку коммита/пуша.
-
-## 11. Приоритетный порядок продолжения
-
-### Шаг 1
-
-Принять и отфильтровать `Deep Research`.
-
-Нужен результат:
-
-- финальное позиционирование;
-- direct competitors;
-- buyer/JTBD clarity;
-- pricing/offer/CTA guidance.
-
-### Шаг 2
-
-Принять и отфильтровать `Swarm`.
-
-Нужен результат:
-
-- usable landing drafts;
-- FAQ / objections;
-- onboarding materials;
-- extraction по menu-module.
-
-### Шаг 3
-
-Заполнить `POSITIONING_FINAL.md`.
-
-### Шаг 4
-
-Заполнить `LANDING_BRIEF_FINAL.md`.
-
-### Шаг 5
-
-Только после этого принимать решения:
-
-- по финальному контенту страницы;
-- по интеграции menu-domain;
-- по следующему пакету product/engineering tasks.
-
-## 12. Что нельзя потерять
-
-- не раздувать scope;
-- не обещать на лендинге то, чего нет в demo tenant;
-- не перетаскивать внешний menu-module целиком;
-- не ломать уже сделанный cloud/security hardening;
-- не забыть, что в рабочем дереве уже есть незакоммиченные технические правки.
-
-## 13. Готовый стартовый текст для нового чата
-
-Ниже текст, который можно вставить в новый чат вместе с этим файлом:
+Покрыто:
+
+- settings get/update;
+- working hours;
+- onboarding status;
+- onboarding complete;
+- audit log;
+- audit filters.
+
+### Integration / infra
+
+Покрыто:
+
+- bootstrap / Redis smoke;
+- revoked-token post-logout;
+- bot tenant routing;
+- staging integration workflow.
+
+## 8. На что смотреть первым делом, если продолжаем
+
+Если работа идёт по admin/auth/integration/deploy, сначала читать актуальные файлы:
+
+- `apps/admin_api/main.py`
+- `api/routes/auth.py`
+- `api/routes/users.py`
+- `api/routes/settings.py`
+- `api/routes/onboarding.py`
+- `api/routes/audit.py`
+- `shared/mvp_bootstrap.py`
+- `shared/jwt_utils.py`
+- `shared/auth_dependencies.py`
+- `.github/workflows/ci.yml`
+- `.github/workflows/integration-staging.yml`
+- `docker/Caddyfile`
+
+Не опираться на старые handoff-заметки или раннее состояние дерева.
+
+## 9. Открытые практические темы
+
+На текущий момент не выглядит как авария, но это нормальные следующие зоны работы:
+
+1. ✅ Прогнать полный локальный unit suite — **выполнено**, `163 passed, 8 skipped, 28 deselected`.
+2. ✅ Добавить `pytest.mark.integration` к integration-тестам (`test_auth.py`, `test_users.py`, `test_admin_routes.py`) — **выполнено**.
+3. ⏳ Прогнать integration path на доступных Postgres/Redis или через staging workflow.
+4. ⏳ Сделать end-to-end pilot walkthrough:
+   - `provision_tenant.py`
+   - `upload_menu.py` / `seed_demo_tenant.py`
+   - first admin login
+   - webapp order flow
+   - payment flow
+   - logout/login retry
+5. ⏳ Дочистить и структурировать runbook/ops шаги, если пойдут новые деплойные изменения.
+
+## 10. Что не делать
+
+- не откатывать ничего вслепую;
+- не исходить из старого состояния admin/auth/deploy;
+- не смешивать новый функциональный diff с unrelated cleanup;
+- не ломать CLI provisioning возвратом к HTTP bootstrap;
+- не тащить frontend build artifacts в базовый Python image.
+
+## 11. Готовый стартовый текст для нового чата
 
 ```text
-Используй HANDOFF.md как основной стартовый контекст.
+Используй HANDOFF.md как основной контекст.
 
-Работаем над RestoBot в репозитории `restobot`, ветка `codex/yc-mvp-deploy`.
-Нужно продолжить без повторного общего анализа.
+Работаем в `C:\Users\Имярек\Downloads\restobot-main`, ветка `codex/yc-mvp-deploy`.
+Working tree должен быть clean, ветка ahead of origin.
 
 Сначала:
-1. восстанови рабочую картину по HANDOFF.md,
-2. зафиксируй, что уже сделано,
-3. затем переходи к следующему активному шагу:
-   приёмка артефактов Deep Research и Swarm,
-   сборка final positioning и landing brief.
-```
+1. проверь `git status`,
+2. подтверди текущее состояние по HANDOFF.md,
+3. только потом переходи к следующей инженерной задаче.
 
+Если задача касается admin/auth/integration/deploy, сначала прочитай актуальные:
+- apps/admin_api/main.py
+- api/routes/auth.py
+- api/routes/users.py
+- api/routes/settings.py
+- api/routes/onboarding.py
+- api/routes/audit.py
+- shared/mvp_bootstrap.py
+- docker/Caddyfile
+- .github/workflows/integration-staging.yml
+```
