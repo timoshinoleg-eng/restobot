@@ -25,7 +25,8 @@ export function SessionForm({ tenant }: { tenant: string }) {
     }
     setLoading(true);
     try {
-      const externalId = tgUser?.id ? `tg-${tgUser.id}` : `webapp-${crypto.randomUUID()}`;
+      const uuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const externalId = tgUser?.id ? `tg-${tgUser.id}` : `webapp-${uuid}`;
       const session = await createWidgetSession(tenant, externalId, name.trim(), phone.trim() || null);
       setSession(session);
     } catch (err) {
