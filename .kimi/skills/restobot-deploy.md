@@ -401,3 +401,10 @@ terraform apply deploy.tfplan
 - Compose: previous `.env.prod` state is source of truth; `cd /opt/restobot && docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate` to revert to last known image tags.
 - Image rollback: if new image is broken, revert `ADMIN_IMAGE` / `PUBLIC_IMAGE` in `.env.prod`, then `cd /opt/restobot && docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate`.
 - Service-only rollback: `cd /opt/restobot && docker compose -f docker-compose.prod.yml --env-file .env.prod restart [admin|public|caddy|bot]`
+
+## CURRENT DEPLOY STATE (as of 2026-05-05)
+- **Schema:** `005` (head)
+- **Active image tag:** `manual-20260505141001-3f3f6ea`
+- **Status:** GO — all infra baseline + migration 005 confirmed stable
+- **Terraform last apply:** 0 added, 3 changed, 0 destroyed (admin/public/migrate image tags only)
+- **Known operational item:** legacy `demo` tenant has `password_hash=null` and `setup_token=null` in DB. Admin login for this tenant requires manual activation (set `setup_token` or `password_hash` via DB or onboarding flow).

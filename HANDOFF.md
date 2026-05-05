@@ -346,6 +346,16 @@ Working tree не clean. Не откатывай infra-изменения всл
 3. подтверди наличие infra/yc/security-group-rules.tf, runtime_vpc_user и Redis reconnect fix,
 4. только потом переходи к следующей functional/ops задаче.
 
+## 12. Post-migration 005 deploy state
+
+- **Schema version:** `005` (head)
+- **Image tag:** `manual-20260505141001-3f3f6ea`
+- **Deploy verdict:** GO
+- **Terraform apply:** 0 added, 3 changed, 0 destroyed (only image tags updated)
+- **Migration runner:** success — upgrade 004 → 005 applied
+- **Smoke:** /health x5 → 200; widget/menu → 200; widget/session → 201; admin/ → 200; admin/demo/orders (no auth) → 401; all 005-dependent admin endpoints return 401 (initialized, no 500s)
+- **Known issue:** legacy `demo` tenant has `password_hash=null` and `setup_token=null`, so admin login requires separate activation (set setup_token or password_hash manually)
+
 Не делай:
 - ручные .tf правки на VM
 - allUsers invoker
