@@ -283,7 +283,7 @@ Critical infra-debug завершен. Дальше логичный поряд�
 2. Проверка order/payment flow
 3. Проверка admin UI в браузере, если нужен визуальный smoke
 4. Отдельно, если нужно, проверить `migration_runner`
-5. Отдельно решить, когда выкатывать migration `005_add_admin_tables.py`
+5. Migration `005_add_admin_tables.py` уже выкачена и подтверждена — дальнейший фокус на полноценном admin flow (login, menu upload, dashboard, loyalty, onboarding)
 
 То есть следующий фокус уже не на сетевом path, а на functional verification.
 
