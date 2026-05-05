@@ -1,6 +1,6 @@
 # restobot-deploy
-version: 1.0.2
-stack: Python,FastAPI,React,Docker,Caddy,Telegram
+version: 1.2.0
+stack: Python,FastAPI,React,Docker,Caddy,Telegram,YC Serverless
 
 ## ARCHITECTURE
 - VM: 51.250.91.143, ubuntu, ssh -i C:\Users\Имярек\.ssh\openclaw_key
@@ -296,6 +296,105 @@ curl -s -o /dev/null -w "https_widget:%{http_code}\n" --insecure https://app.cha
 - Redis is external (YC Managed Redis at `rc1a-9qjbbk3fmsdjlb6h.mdb.yandexcloud.net:6379`, TLS disabled).
 - Exact-match `/admin` and `/widget` routes are present in local repo `docker/Caddyfile` but INTENTIONALLY ABSENT on VM. DO NOT add them.
 - If `curl https://DOMAIN` fails with `connection refused` — FIRST check `ss -tlnp | grep :443` on VM. If 443 is not listening, the problem is YC Security Group or DNS A-record, NOT Caddyfile. DO NOT touch Caddyfile. Fix firewall first.
+
+## YC SERVERLESS CONTAINERS (Terraform: infra/yc)
+- **Terraform dir:** `infra/yc` (локально и на VM `/opt/restobot/infra/yc`)
+- **Backend:** S3 `restobot-tfstate-bucket-unique-20260430`
+- **Images:** `cr.yandex/crp3m1quoo95obppic6e/restobot-{admin,public,migrate}:TAG`
+- **Gateway:** `https://d5dql99olrs7m7lascpm.628pfjdx.apigw.yandexcloud.net`
+- **DB:** `restobot-mvp-postgres` (`rc1a-skqer2ssphs8dhib.mdb.yandexcloud.net:6432`)
+- **Redis:** `restobot-mvp-redis` (`rc1a-9qjbbk3fmsdjlb6h.mdb.yandexcloud.net:6379`, TLS disabled)
+- **VPC:** `enp9gvbk39vipha0ib4o`, subnets `10.0.1.0/24` (a), `10.0.2.0/24` (b), `10.0.3.0/24` (d)
+- **Runtime SA:** `ajeekhvh9qclb84dmce2` (roles: `serverless.containers.invoker`, `container-registry.images.puller`, `monitoring.editor`, `vpc.user` **required for connectivity**)
+- **Connectivity status:** SOLVED — `GET /health` returns **200** consistently. Root cause был двойной: отсутствие `connectivity` + missing SG ingress для YC Serverless service subnet (`198.19.0.0/16`).
+
+### Container entrypoint
+- Образы собираются из `docker/Dockerfile.admin` и `docker/Dockerfile.public`.
+- В Dockerfile CMD: `python scripts/run_admin.py` / `python scripts/run_public.py` (скрипты корректно настраивают `sys.path`).
+- **Terraform `containers.tf` ПЕРЕОПРЕДЕЛЯЕТ** entrypoint на `command = ["python"]`, `args = ["-m", "apps.admin_api.main"]` с `work_dir = "/app"`.
+- Оба подхода работают в актуальных образах. Старые образы в registry (`manual-20260502000125-12fea33` и ранее) имели проблему с `ModuleNotFoundError`, которая решена в текущем коде.
+
+### Connectivity & DNS
+- **Without `connectivity`:** serverless runtime cannot resolve YC Managed DB/Redis FQDNs → `/health` returns **503** with `Name or service not known` for BOTH DB and Redis.
+- **With `connectivity` ON but SG blocks the serverless source range:** DNS resolves, but TCP SYN is dropped by the DB/Redis security group → TCP hangs → container execution timeout → **504** from gateway.
+- **With connectivity + SG OK, но singleton Redis stale:** DB healthy, Redis unhealthy с ошибкой `TCPTransport closed=True` → fast **503** (~1-2s). Решение в `shared/redis_client.py` (см. раздел Redis stability).
+- **Required fix order:**
+  1. Enable `serverless=true` on PostgreSQL cluster (`configSpec.access.serverless` via API or Terraform).
+  2. Add `connectivity { network_id = yandex_vpc_network.restobot.id }` to admin/public/migration containers.
+  3. Ensure runtime SA has `vpc.user` role on folder BEFORE creating the revision with connectivity.
+  4. **Add SG ingress rules for YC Serverless service subnet `198.19.0.0/16`** on DB (6432) and Redis (6379, 6380) ports.  
+     This is the documented YC Serverless runtime NAT/service CIDR — not empirical magic.  
+     Without it the managed services drop packets from serverless revisions even though DNS and `serverless=true` are correct.  
+     See `infra/yc/security-group-rules.tf`.
+  5. **Fix Redis singleton reconnect** (см. ниже).
+
+### PostgreSQL serverless access (API)
+```bash
+# GET current access
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/$CLUSTER_ID"
+
+# PATCH (correct field is configSpec, not config)
+curl -s -X PATCH \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"configSpec": {"access": {"serverless": true}}, "updateMask": "configSpec.access.serverless"}' \
+  "https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/$CLUSTER_ID"
+```
+- Operation takes ~60s; verify with `GET /operations/{opId}`.
+- **Do NOT confuse** with `serverless_access` Terraform variable — that is a different concept (previously misleading).
+
+### Cloud Logging (read via SDK, NOT yc CLI)
+- `yc logging read` requires **OAuth token**; IAM token fails with "OAuth token is invalid".
+- **Working approach:** Python `yandexcloud` SDK with IAM token over gRPC.
+- Default log group: `e23g5h28u4b6je0hgvmc` (folder `b1g447hnv7s5o74n4qcr`).
+- Resource type for serverless container logs: `serverless-container` (with hyphen).
+- Example: see `/tmp/get_logs7.py` pattern on VM.
+
+### Gateway vs Direct Invoke
+- **Gateway:** `https://d5dql99olrs7m7lascpm.628pfjdx.apigw.yandexcloud.net/health`
+  - Hard timeout ~30s. If container takes >30s, returns **504** (`JobExecutionTimeoutExceeded`).
+- **Direct invoke:** `https://bbat13jql8mciiac5g21.containers.yandexcloud.net/health`
+  - Requires `Authorization: Bearer <IAM-token>` with `serverless.containers.invoker` role on the container (or `allUsers` binding for unauthenticated).
+  - Useful for diagnostics when gateway returns 504 but you need the actual body.
+
+### Execution timeout
+- Default: `30s`. Increase to `60s` temporarily for diagnostics if container hangs on DB retries.
+- `check_database_health` retries 5 times with exponential backoff (delay 1.5s → ~22s total sleep), so 30s is tight.
+
+### Redis stability in serverless (singleton fix)
+- **Проблема:** `redis.asyncio` singleton (`_redis`) переживает idle/pause циклы Serverless Containers. TCP-соединение закрывается платформой, но Python-объект остаётся. При повторном `get_redis()` возвращается мёртвый клиент → `TCPTransport closed=True`.
+- **Решение (уже в `shared/redis_client.py`):**
+  - `health_check_interval=30` — пул сам проверяет соединения.
+  - `retry_on_timeout=True`, `socket_keepalive=True`.
+  - `check_redis_health()` ловит `ConnectionError`, сбрасывает `_redis = None` и пробует один раз пересоздать клиент.
+  - Cache-helpers (`get_cache`, `set_cache`, `delete_cache`) отдельно ловят `ConnectionError` и сбрасывают `_redis`.
+  - `shared/app_factory.py` инициализирует Redis **eagerly** в lifespan (`await get_redis()` на старте), а не lazy при первом запросе.
+
+### Admin static files
+- `static/admin/` (index.html, menu.html, orders.html) должен попадать в образ через `COPY` в Dockerfile.
+- Если `GET /admin/` возвращает 404 — образ собран без `static/admin/` (либо старый образ в registry).
+- FastAPI монтирует `StaticFiles` в `apps/admin_api/main.py` при наличии директории.
+
+### Build & deploy from Windows
+- **Docker Desktop должен быть запущен.** Если `docker version` показывает `failed to connect to the docker API` — запустить Docker Desktop.
+- **Build:** `docker build --platform linux/amd64 -f docker/Dockerfile.{admin,public} -t cr.yandex/.../restobot-{admin,public}:TAG .`
+- **Push:** `yc container registry configure-docker`, затем `docker push cr.yandex/.../restobot-{admin,public}:TAG`
+- **Migration image:** `docker tag admin-image migrate-image && docker push migrate-image`
+- **Terraform:**
+  - `terraform.tfvars.pilot` — реальные значения с секретами. **НЕ КОММИТИТЬ.**
+  - `terraform.tfvars.example` — шаблон без секретов, можно в repo.
+  - `terraform init -backend-config=.tmpdeploy/backend.hcl`
+  - `terraform plan -var-file=terraform.tfvars.pilot -out=deploy.tfplan`
+  - `terraform apply deploy.tfplan`
+- **YC auth для Terraform:** `export YC_TOKEN=$(yc iam create-token)` или `TF_VAR_yc_token=...`.
+
+### Typical Terraform apply flow
+```bash
+cd /opt/restobot/infra/yc
+export YC_TOKEN=$(yc iam create-token)
+terraform plan -var-file=terraform.tfvars.pilot -out=deploy.tfplan
+terraform apply deploy.tfplan
+```
 
 ## ROLLBACK
 - Caddyfile: ALWAYS backup before change: `cp /opt/restobot/Caddyfile /opt/restobot/Caddyfile.bak.$(date +%s)`
