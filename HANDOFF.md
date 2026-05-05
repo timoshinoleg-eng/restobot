@@ -13,6 +13,8 @@
 - Terraform pilot attach flow уже стабилизирован;
 - root cause `502/503/504` на `/health` найден;
 - production-like `/health` сейчас подтвержденно работает;
+- Redis reconnect issue после выкатки новых образов уже подтвержденно исправлен;
+- static admin UI теперь реально отдается из контейнера;
 - следующий фокус уже не на infra-debug, а на smoke/e2e и дальнейшей операционке.
 
 ## 2. Текущее состояние дерева
@@ -35,6 +37,10 @@ Working tree **не clean**.
 - [infra/yc/variables.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/variables.tf)
 
 Есть также много временных/диагностических локальных файлов в корне repo и сервисных папках. Они не являются source of truth для infra. Источник истины по YC deploy — `infra/yc/*.tf` в репозитории.
+
+Опорный коммит для текущего рабочего состояния:
+
+- `d19d694` `fix(deploy): restore yc serverless connectivity and stabilize redis health`
 
 ## 3. Что уже сделано по YC infra
 
@@ -67,6 +73,7 @@ Working tree **не clean**.
 - runtime entrypoint fix:
   - `admin_api`: `python -m apps.admin_api.main`
   - `public_api`: `python -m apps.public_api.main`
+- `connectivity` для `admin_api` и `public_api` должна быть включена и не должна теряться при следующих правках
 
 Причина: старый registry image не умел корректно стартовать через `python scripts/run_admin.py` / `python scripts/run_public.py`.
 
@@ -98,6 +105,29 @@ Working tree **не clean**.
 - `198.19.0.0/16` → Redis TLS `6380`
 
 Это финальный fix, который реально починил `/health`.
+
+### 3.3 Изменения в приложении после infra-fix
+
+#### [shared/redis_client.py](C:/Users/Имярек/Downloads/restobot-main/shared/redis_client.py)
+
+Подтвержденный fix против intermittent Redis unhealthy:
+
+- добавлены pool health settings:
+  - `health_check_interval=30`
+  - `retry_on_timeout=True`
+  - `socket_keepalive=True`
+- при `redis.ConnectionError` singleton клиент сбрасывается;
+- `check_redis_health()` делает одну попытку пересоздания клиента перед возвратом `unhealthy`;
+- cache helpers (`get_cache`, `set_cache` и т.п.) тоже сбрасывают singleton при connection-level ошибке
+
+#### [shared/app_factory.py](C:/Users/Имярек/Downloads/restobot-main/shared/app_factory.py)
+
+В `lifespan` добавлена eager Redis initialization при старте контейнера.
+
+Причина:
+
+- без этого serverless instance мог просыпаться с уже умершим соединением из старого пула;
+- после фикса `/health x10` прошел без Redis flaps.
 
 ## 4. Root cause и как он был закрыт
 
@@ -141,6 +171,24 @@ Working tree **не clean**.
 - SYN packets к DB/Redis дропались SG, из-за чего app доходил до timeout и gateway отдавал `504`
 
 После добавления SG-правил под `198.19.0.0/16` проблема полностью ушла.
+
+### 4.3 Третий root cause: Redis stale connection reuse
+
+После того как infra-path был починен, осталось intermittent поведение:
+
+- быстрый `503`
+- `database healthy`
+- `redis unhealthy`
+- ошибка вида `the handler is closed`
+
+Это уже было не infra и не DNS, а проблема reuse мертвого Redis connection в singleton/pool.
+
+После изменений в:
+
+- [shared/redis_client.py](C:/Users/Имярек/Downloads/restobot-main/shared/redis_client.py)
+- [shared/app_factory.py](C:/Users/Имярек/Downloads/restobot-main/shared/app_factory.py)
+
+и после сборки/выкатки новых образов проблема ушла.
 
 ## 5. Финальное подтвержденное рабочее состояние
 
@@ -199,6 +247,22 @@ Working tree **не clean**.
 - обе зависимости healthy;
 - `/health` стабильно возвращает `200`.
 
+Дополнительно подтверждено после пересборки/выкатки новых образов:
+
+- `/health x10` подряд:
+  - все 10 ответов `200`
+  - Redis healthy во всех 10 случаях
+- `GET /widget/demo/menu` → `200`
+- `POST /widget/demo/session` → `201`
+- `GET /admin/` → `200`
+- `GET /admin/demo/orders` без токена → `401`
+
+Это означает:
+
+- Redis reconnect fix реально применился;
+- static admin files реально попали в новый образ;
+- admin/public контуры в рабочем состоянии.
+
 ## 6. Что теперь считать baseline
 
 Считать эталонным только это состояние:
@@ -215,11 +279,11 @@ Working tree **не clean**.
 
 Critical infra-debug завершен. Дальше логичный порядок:
 
-1. Smoke admin contour
-2. Smoke public/widget contour
-3. Проверка tenant provisioning flow
-4. Проверка order/payment flow
-5. Отдельно, если нужно, проверить `migration_runner`
+1. Проверка tenant provisioning flow
+2. Проверка order/payment flow
+3. Проверка admin UI в браузере, если нужен визуальный smoke
+4. Отдельно, если нужно, проверить `migration_runner`
+5. Отдельно решить, когда выкатывать migration `005_add_admin_tables.py`
 
 То есть следующий фокус уже не на сетевом path, а на functional verification.
 
@@ -232,6 +296,8 @@ Critical infra-debug завершен. Дальше логичный поряд�
 - не добавлять временные `allUsers`, forced labels, forced revision env;
 - не трогать image tags без отдельной необходимости;
 - не трогать `migration_runner`, если задача не про миграции.
+- не терять `connectivity` блоки в `infra/yc/containers.tf` при следующих правках;
+- не откатывать Redis reconnect fix в `shared/redis_client.py` / `shared/app_factory.py`.
 
 ## 9. Безопасность
 
@@ -257,6 +323,7 @@ Critical infra-debug завершен. Дальше логичный поряд�
 - [infra/yc/containers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/containers.tf)
 - [infra/yc/security-group-rules.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/security-group-rules.tf)
 - [infra/yc/service-account.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/service-account.tf)
+- [static/admin/index.html](C:/Users/Имярек/Downloads/restobot-main/static/admin/index.html)
 
 ## 11. Готовый стартовый текст для нового чата
 
@@ -270,12 +337,13 @@ Working tree не clean. Не откатывай infra-изменения всл
 - YC critical infra-debug уже завершен
 - root cause /health 504 закрыт
 - текущее рабочее состояние: connectivity ON + vpc.user + SG rules для 198.19.0.0/16 + entrypoint через python -m
-- /health уже подтвержден как 200
+- /health уже подтвержден как 200 и Redis fix после пересборки образов тоже подтвержден
+- опорный коммит: d19d694
 
 Сначала:
 1. прочитай HANDOFF.md,
 2. проверь `git status`,
-3. подтверди наличие infra/yc/security-group-rules.tf и runtime_vpc_user,
+3. подтверди наличие infra/yc/security-group-rules.tf, runtime_vpc_user и Redis reconnect fix,
 4. только потом переходи к следующей functional/ops задаче.
 
 Не делай:
