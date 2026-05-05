@@ -16,6 +16,12 @@ database_pool_max   = 2
 yc_zone             = "ru-central1-a"
 subnet_cidr         = "10.10.0.0/24"
 object_storage_bucket = "restobot-mvp-assets"
+existing_db_host    = "rc1a-example-postgres.mdb.yandexcloud.net"
+existing_redis_host = "rc1a-example-redis.mdb.yandexcloud.net"
+existing_common_secret_version_id = "e6qxxxxxxxxxxxxxxxxx"
+existing_db_secret_version_id     = "e6qyyyyyyyyyyyyyyyyy"
+existing_redis_secret_version_id  = "e6qzzzzzzzzzzzzzzzzz"
+redis_tls_enabled   = false
 
 admin_image         = "cr.yandex/placeholder/restobot-admin:bootstrap"
 public_image        = "cr.yandex/placeholder/restobot-public:bootstrap"

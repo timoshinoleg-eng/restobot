@@ -60,6 +60,15 @@ def create_lifespan(service_name: str) -> Callable[[FastAPI], AsyncGenerator[Non
             await init_database()
         except Exception:
             logger.exception("startup_dependency_initialization_failed", extra={"service": service_name})
+        # Proactively warm the Redis connection pool so the first request does
+        # not pay the connection-setup penalty.  Failure here is non-fatal;
+        # get_redis() will retry lazily on the next call.
+        try:
+            from shared.redis_client import get_redis
+
+            await get_redis()
+        except Exception:
+            logger.exception("startup_redis_initialization_failed", extra={"service": service_name})
         yield
         await close_redis()
         await close_database()

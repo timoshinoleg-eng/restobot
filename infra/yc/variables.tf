@@ -62,10 +62,6 @@ variable "enable_bootstrap_api" {
   description = "Whether the protected bootstrap onboarding endpoint is enabled in production."
   type        = bool
   default     = false
-  validation {
-    condition     = var.enable_bootstrap_api == false || var.bootstrap_api_token != null
-    error_message = "bootstrap_api_token must be set when enable_bootstrap_api is true."
-  }
 }
 
 variable "database_pool_min" {
@@ -82,10 +78,6 @@ variable "database_pool_max" {
   description = "Maximum SQLAlchemy/asyncpg pool size per container instance."
   type        = number
   default     = 2
-  validation {
-    condition     = var.database_pool_max >= var.database_pool_min
-    error_message = "database_pool_max must be greater than or equal to database_pool_min."
-  }
 }
 
 variable "yc_zone" {
@@ -98,6 +90,42 @@ variable "subnet_cidr" {
   description = "Single /24 subnet used by serverless connectivity and managed databases."
   type        = string
   default     = "10.10.0.0/24"
+}
+
+variable "existing_db_host" {
+  description = "Existing Managed PostgreSQL host FQDN used by the pilot environment."
+  type        = string
+  default     = null
+}
+
+variable "existing_redis_host" {
+  description = "Existing Managed Redis/Valkey host FQDN used by the pilot environment."
+  type        = string
+  default     = null
+}
+
+variable "existing_common_secret_version_id" {
+  description = "Existing Lockbox version ID for the common application secret."
+  type        = string
+  default     = null
+}
+
+variable "existing_db_secret_version_id" {
+  description = "Existing Lockbox version ID for the database secret."
+  type        = string
+  default     = null
+}
+
+variable "existing_redis_secret_version_id" {
+  description = "Existing Lockbox version ID for the Redis secret."
+  type        = string
+  default     = null
+}
+
+variable "redis_tls_enabled" {
+  description = "Whether the attached Redis endpoint expects TLS."
+  type        = bool
+  default     = true
 }
 
 variable "object_storage_bucket" {

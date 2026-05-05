@@ -12,18 +12,18 @@ resource "yandex_serverless_container" "admin_api" {
     type = "http"
   }
 
-  connectivity {
-    network_id = yandex_vpc_network.restobot.id
-  }
-
   provision_policy {
     min_instances = 1
+  }
+
+  connectivity {
+    network_id = yandex_vpc_network.restobot.id
   }
 
   image {
     url      = var.admin_image
     command  = ["python"]
-    args     = ["scripts/run_admin.py"]
+    args     = ["-m", "apps.admin_api.main"]
     work_dir = "/app"
     environment = {
       ENVIRONMENT              = "production"
@@ -35,61 +35,51 @@ resource "yandex_serverless_container" "admin_api" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
-      REDIS_HOST               = local.redis_host
+      REDIS_HOST               = var.existing_redis_host
       REDIS_PORT               = "6379"
-      REDIS_TLS_ENABLED        = "true"
+      REDIS_TLS_ENABLED        = tostring(var.redis_tls_enabled)
       REDIS_DB                 = "0"
     }
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "jwt_secret"
     environment_variable = "JWT_SECRET"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "telegram_token"
     environment_variable = "TELEGRAM_BOT_TOKEN"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_shop_id"
     environment_variable = "YOOKASSA_SHOP_ID"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_secret_key"
     environment_variable = "YOOKASSA_SECRET_KEY"
   }
 
-  dynamic "secrets" {
-    for_each = var.bootstrap_api_token == null ? [] : [1]
-    content {
-      id                   = yandex_lockbox_secret.common.id
-      version_id           = yandex_lockbox_secret_version.common.id
-      key                  = "bootstrap_api_token"
-      environment_variable = "BOOTSTRAP_API_TOKEN"
-    }
-  }
-
   secrets {
     id                   = yandex_lockbox_secret.db.id
-    version_id           = yandex_lockbox_secret_version.db.id
+    version_id           = var.existing_db_secret_version_id
     key                  = "database_url"
     environment_variable = "DATABASE_URL"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.redis.id
-    version_id           = yandex_lockbox_secret_version.redis.id
+    version_id           = var.existing_redis_secret_version_id
     key                  = "redis_password"
     environment_variable = "REDIS_PASSWORD"
   }
@@ -114,18 +104,18 @@ resource "yandex_serverless_container" "public_api" {
     type = "http"
   }
 
-  connectivity {
-    network_id = yandex_vpc_network.restobot.id
-  }
-
   provision_policy {
     min_instances = 1
+  }
+
+  connectivity {
+    network_id = yandex_vpc_network.restobot.id
   }
 
   image {
     url      = var.public_image
     command  = ["python"]
-    args     = ["scripts/run_public.py"]
+    args     = ["-m", "apps.public_api.main"]
     work_dir = "/app"
     environment = {
       ENVIRONMENT              = "production"
@@ -136,51 +126,51 @@ resource "yandex_serverless_container" "public_api" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
-      REDIS_HOST               = local.redis_host
+      REDIS_HOST               = var.existing_redis_host
       REDIS_PORT               = "6379"
-      REDIS_TLS_ENABLED        = "true"
+      REDIS_TLS_ENABLED        = tostring(var.redis_tls_enabled)
       REDIS_DB                 = "0"
     }
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "jwt_secret"
     environment_variable = "JWT_SECRET"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "telegram_token"
     environment_variable = "TELEGRAM_BOT_TOKEN"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_shop_id"
     environment_variable = "YOOKASSA_SHOP_ID"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_secret_key"
     environment_variable = "YOOKASSA_SECRET_KEY"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.db.id
-    version_id           = yandex_lockbox_secret_version.db.id
+    version_id           = var.existing_db_secret_version_id
     key                  = "database_url"
     environment_variable = "DATABASE_URL"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.redis.id
-    version_id           = yandex_lockbox_secret_version.redis.id
+    version_id           = var.existing_redis_secret_version_id
     key                  = "redis_password"
     environment_variable = "REDIS_PASSWORD"
   }
@@ -223,51 +213,51 @@ resource "yandex_serverless_container" "migration_runner" {
       YC_CLOUD_ID              = var.yc_cloud_id
       YC_FOLDER_ID             = var.yc_folder_id
       YC_OBJECT_STORAGE_BUCKET = var.object_storage_bucket
-      REDIS_HOST               = local.redis_host
+      REDIS_HOST               = var.existing_redis_host
       REDIS_PORT               = "6379"
-      REDIS_TLS_ENABLED        = "true"
+      REDIS_TLS_ENABLED        = tostring(var.redis_tls_enabled)
       REDIS_DB                 = "0"
     }
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "jwt_secret"
     environment_variable = "JWT_SECRET"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "telegram_token"
     environment_variable = "TELEGRAM_BOT_TOKEN"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_shop_id"
     environment_variable = "YOOKASSA_SHOP_ID"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.common.id
-    version_id           = yandex_lockbox_secret_version.common.id
+    version_id           = var.existing_common_secret_version_id
     key                  = "yokassa_secret_key"
     environment_variable = "YOOKASSA_SECRET_KEY"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.db.id
-    version_id           = yandex_lockbox_secret_version.db.id
+    version_id           = var.existing_db_secret_version_id
     key                  = "database_url"
     environment_variable = "DATABASE_URL"
   }
 
   secrets {
     id                   = yandex_lockbox_secret.redis.id
-    version_id           = yandex_lockbox_secret_version.redis.id
+    version_id           = var.existing_redis_secret_version_id
     key                  = "redis_password"
     environment_variable = "REDIS_PASSWORD"
   }

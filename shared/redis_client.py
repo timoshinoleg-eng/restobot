@@ -10,7 +10,6 @@ from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
 _redis: Optional[redis.Redis] = None
 
 
@@ -23,6 +22,14 @@ async def get_redis() -> redis.Redis:
             "decode_responses": True,
             "socket_timeout": 5.0,
             "socket_connect_timeout": 5.0,
+            # Detect and replace stale connections before returning them to callers.
+            # YC Managed Redis closes idle connections; without this the pool
+            # hands out dead TCP transports causing "handler is closed" errors.
+            "health_check_interval": 30,
+            "retry_on_timeout": True,
+            # Keep TCP sockets alive to prevent middleboxes / NAT gateways from
+            # dropping long-lived connections in serverless environments.
+            "socket_keepalive": True,
         }
         if redis_url.startswith("rediss://"):
             client_kwargs["ssl_cert_reqs"] = "required"
@@ -45,16 +52,37 @@ async def close_redis() -> None:
 
 
 async def check_redis_health() -> dict[str, Any]:
-    """Run a Redis PING for the HTTP health endpoint."""
+    """Run a Redis PING for the HTTP health endpoint.
+
+    Uses a retry loop: if the first PING fails (e.g. stale connection closed
+    by the server) we discard the client and try once more with a fresh
+    connection.  This prevents intermittent 503s from a single dead TCP
+    transport in the pool.
+    """
     health: dict[str, Any] = {"status": "unknown"}
-    try:
-        client = await get_redis()
-        pong = await client.ping()
-        health["status"] = "healthy" if pong else "degraded"
-    except Exception as exc:
-        logger.exception("redis_health_failed")
-        health["status"] = "unhealthy"
-        health["error"] = str(exc)
+    global _redis
+    last_error: Optional[Exception] = None
+
+    for attempt in range(2):
+        try:
+            client = await get_redis()
+            pong = await client.ping()
+            health["status"] = "healthy" if pong else "degraded"
+            return health
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "redis_health_ping_failed",
+                extra={"attempt": attempt + 1, "error": str(exc)},
+            )
+            # Force re-creation of the client on next loop iteration.
+            # The connection may have been closed by the server (idle timeout)
+            # or the TCP transport may be dead ("handler is closed").
+            _redis = None
+
+    # Both attempts failed
+    health["status"] = "unhealthy"
+    health["error"] = f"{type(last_error).__name__}: {last_error}" if last_error else "unknown"
     return health
 
 

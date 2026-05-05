@@ -1,7 +1,7 @@
 resource "yandex_api_gateway" "restobot" {
   name              = "${local.project_name}-${local.environment}-gateway"
   description       = "Public gateway for RestoBot admin and widget APIs."
-  execution_timeout = "30s"
+  execution_timeout = "30"
 
   spec = <<-EOT
 openapi: 3.0.0

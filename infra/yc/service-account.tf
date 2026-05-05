@@ -14,3 +14,9 @@ resource "yandex_resourcemanager_folder_iam_member" "runtime_container_invoker" 
   role      = "serverless.containers.invoker"
   member    = "serviceAccount:${yandex_iam_service_account.runtime.id}"
 }
+
+resource "yandex_resourcemanager_folder_iam_member" "runtime_vpc_user" {
+  folder_id = var.yc_folder_id
+  role      = "vpc.user"
+  member    = "serviceAccount:${yandex_iam_service_account.runtime.id}"
+}

@@ -1,223 +1,262 @@
 # RestoBot Handoff
 
-Дата: 2026-05-04
-Репозиторий: `C:\Users\Имярек\Downloads\restobot-main`
+Дата: 2026-05-05  
+Репозиторий: `C:\Users\Имярек\Downloads\restobot-main`  
 Ветка: `codex/yc-mvp-deploy`
-Состояние: `ahead 25`, working tree clean (единственное локальное изменение — этот `HANDOFF.md`)
 
 ## 1. Что это за срез
 
-Это актуальный handoff для продолжения работы без повторной раскопки проекта.
-Ниже только текущее инженерное состояние, подтверждённые точки и ближайший pragmatic next step.
+Это актуальный handoff после завершения critical YC Serverless/VPC debugging.
 
-## 2. Текущий статус продукта и платформы
+На этом срезе:
+
+- Terraform pilot attach flow уже стабилизирован;
+- root cause `502/503/504` на `/health` найден;
+- production-like `/health` сейчас подтвержденно работает;
+- следующий фокус уже не на infra-debug, а на smoke/e2e и дальнейшей операционке.
+
+## 2. Текущее состояние дерева
+
+Working tree **не clean**.
+
+Основные подтвержденные infra-файлы с изменениями:
+
+- [infra/yc/api-gateway.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/api-gateway.tf)
+- [infra/yc/containers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/containers.tf)
+- [infra/yc/db.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/db.tf)
+- [infra/yc/lockbox.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/lockbox.tf)
+- [infra/yc/network.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/network.tf)
+- [infra/yc/outputs.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/outputs.tf)
+- [infra/yc/providers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/providers.tf)
+- [infra/yc/redis.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/redis.tf)
+- [infra/yc/security-group-rules.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/security-group-rules.tf)
+- [infra/yc/service-account.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/service-account.tf)
+- [infra/yc/terraform.tfvars.example](C:/Users/Имярек/Downloads/restobot-main/infra/yc/terraform.tfvars.example)
+- [infra/yc/variables.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/variables.tf)
+
+Есть также много временных/диагностических локальных файлов в корне repo и сервисных папках. Они не являются source of truth для infra. Источник истины по YC deploy — `infra/yc/*.tf` в репозитории.
+
+## 3. Что уже сделано по YC infra
+
+### 3.1 Pilot attach flow
+
+Стек переведен в безопасный режим для пилота:
+
+- Managed PostgreSQL вынесен из активного Terraform-управления;
+- Managed Redis/Valkey вынесен из активного Terraform-управления;
+- `yandex_lockbox_secret_version.*` больше не создаются Terraform-ом в этом стеке;
+- subnet/security group data plane не пересоздаются текущим стеком;
+- serverless containers получают существующие:
+  - `db_host`
+  - `redis_host`
+  - `Lockbox version ids`
+
+Это было сделано, чтобы убрать destructive plan по Redis/Lockbox/VPC.
+
+### 3.2 Важные Terraform-изменения
+
+#### [infra/yc/containers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/containers.tf)
+
+- контейнеры используют:
+  - `existing_db_host`
+  - `existing_redis_host`
+  - `existing_common_secret_version_id`
+  - `existing_db_secret_version_id`
+  - `existing_redis_secret_version_id`
+- `bootstrap_api_token` dynamic block переписан в безопасную форму;
+- runtime entrypoint fix:
+  - `admin_api`: `python -m apps.admin_api.main`
+  - `public_api`: `python -m apps.public_api.main`
+
+Причина: старый registry image не умел корректно стартовать через `python scripts/run_admin.py` / `python scripts/run_public.py`.
+
+#### [infra/yc/providers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/providers.tf)
+
+Старые cross-variable `validation` убраны и заменены на `check`-блоки, совместимые с реально используемым Terraform runtime.
+
+#### [infra/yc/service-account.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/service-account.tf)
+
+Для runtime service account добавлена роль:
+
+- `vpc.user`
+
+Это обязательная часть serverless VPC-path.
+
+#### [infra/yc/api-gateway.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/api-gateway.tf)
+
+Исправлен `execution_timeout`:
+
+- было: `"30s"`
+- стало: `"30"`
+
+#### [infra/yc/security-group-rules.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/security-group-rules.tf)
+
+Добавлены отдельные ingress-правила для documented YC Serverless service subnet range:
+
+- `198.19.0.0/16` → PostgreSQL `6432`
+- `198.19.0.0/16` → Redis `6379`
+- `198.19.0.0/16` → Redis TLS `6380`
+
+Это финальный fix, который реально починил `/health`.
+
+## 4. Root cause и как он был закрыт
+
+### 4.1 Первый root cause: сломанный entrypoint в старом image
 
 Подтверждено:
 
-- production и demo/pilot контуры поднимались и проверялись;
-- tenant provisioning идёт через CLI, не через HTTP bootstrap;
-- Telegram WebApp обновлён;
-- online payment flow через YooKassa доведён до рабочего backend/frontend контракта;
-- admin backoffice MVP добавлен и заведён в репозиторий;
-- setup token lifecycle стабилизирован;
-- unit и integration CI разделены;
-- integration suite под real Postgres/Redis добавлен.
+- старый image `manual-20260502000125-12fea33`
+- `python scripts/run_admin.py` / `python scripts/run_public.py`
+- ошибка:
+  - `ModuleNotFoundError: No module named 'apps'`
 
-## 3. Что уже есть в коде
+Это было исправлено через `python -m apps.admin_api.main` и `python -m apps.public_api.main`.
 
-### CLI provisioning
+### 4.2 Второй root cause: Serverless connectivity + Security Group mismatch
 
-Основные скрипты:
+После починки entrypoint получили:
 
-- `scripts/provision_tenant.py`
-- `scripts/upload_menu.py`
-- `scripts/seed_demo_tenant.py`
-- `scripts/set_admin_password.py`
-- `scripts/smoke_webapp.py`
+- `connectivity OFF` → быстрый `503`, body показывает DNS failure по DB и Redis
+- `connectivity ON` → долгий `504 execution timeout exceeded`
 
-### Admin Backoffice MVP
+Потом отдельный диагностический serverless container доказал:
 
-Подтверждённые возможности:
+- DNS resolve работает
+- private IP Postgres и Redis резолвятся корректно
+- TCP к PostgreSQL и Redis зависает на timeout
+- source IP serverless runtime приходит не из `10.0.x.x`, а из диапазона `198.19.x.x`
 
-- cookie-based auth;
-- first-login через `setup_token`;
-- JWT revocation on logout;
-- audit log;
-- onboarding / settings / users / menu / orders / bookings / inventory / loyalty pages;
-- static admin panel;
-- graceful startup admin app без `static/admin`.
+Дополнительно собраны 5 cold starts. Наблюдаемые source IP:
 
-Ключевые admin роуты:
+- `198.19.36.229`
+- `198.19.35.242`
+- `198.19.35.215`
+- `198.19.35.253`
+- `198.19.36.76`
 
-- `api/routes/auth.py`
-- `api/routes/audit.py`
-- `api/routes/onboarding.py`
-- `api/routes/settings.py`
-- `api/routes/users.py`
+Из этого стало ясно:
 
-Admin app entrypoint:
+- SG на Postgres/Redis разрешала ingress только с `10.0.1.0/24`, `10.0.2.0/24`, `10.0.3.0/24`
+- Serverless Containers with connectivity используют documented YC service subnet range `198.19.0.0/16`
+- SYN packets к DB/Redis дропались SG, из-за чего app доходил до timeout и gateway отдавал `504`
 
-- `apps/admin_api/main.py`
+После добавления SG-правил под `198.19.0.0/16` проблема полностью ушла.
 
-### WebApp / Public contour
+## 5. Финальное подтвержденное рабочее состояние
 
-Подтверждено:
+Текущее рабочее состояние:
 
-- улучшен дизайн;
-- добавлена маска телефона;
-- frontend/backend flow оплаты синхронизирован;
-- exact-match routing для `/widget` и `/admin` в Caddy исправлен.
+- `admin_api`: `python -m apps.admin_api.main`
+- `public_api`: `python -m apps.public_api.main`
+- `connectivity ON` для `admin_api` и `public_api`
+- runtime SA имеет `vpc.user`
+- PostgreSQL `serverless=true`
+- SG пропускает `198.19.0.0/16` на `6432/6379/6380`
 
-### Infra / deploy
+Проверка `/health` после финального fix:
 
-Подтверждено:
+### Request 1
 
-- `.github/workflows/ci.yml` оставлен для unit/in-memory;
-- `.github/workflows/integration-staging.yml` запускает migrations + integration tests на postgres/redis service containers;
-- `docker/Caddyfile` исправлен для `/admin`, `/widget`, `/admin/health`, `/widget/health`;
-- `.dockerignore` исключает `frontend/webapp/node_modules` и `frontend/webapp/dist`.
+```json
+{
+  "status": "ok",
+  "database": {
+    "session": {
+      "status": "healthy"
+    },
+    "pool": {
+      "status": "healthy",
+      "pool": {
+        "size": 1,
+        "idle": 1
+      }
+    }
+  },
+  "redis": {
+    "status": "healthy"
+  },
+  "version": "1.0.0",
+  "environment": "production"
+}
+```
 
-## 4. Последние значимые коммиты
+- `HTTP 200`
+- `~2.8s` cold start
 
-Последние подтверждённые коммиты:
+### Request 2
 
-- `0a11d14` `fix(admin): graceful startup when static/admin is missing; add regression test`
-- `336b68b` `fix(deploy): add /admin /widget exact-match routes to Caddy; ignore frontend build artifacts in Docker`
-- `64a93cc` `test: cover admin users CRUD, settings, onboarding, audit, auth rate limiter`
-- `ee9b0f6` `test: add admin auth, e2e, integration smoke, bot tenant routing tests`
-- `7afd5ce` `feat(ci,deploy): split unit/integration CI, docker updates, runbook docs`
-- `ce5651b` `feat(api,bot,payments): extend routes, bot tenant routing, payments flow`
-- `475906b` `feat(frontend): add Telegram webapp source and deployment scripts`
-- `ac5b2a8` `feat(admin): add admin backoffice MVP — auth, audit, settings, onboarding, static panel`
+- `HTTP 200`
+- `~1.66s`
 
-## 5. Последняя подтверждённая проверка
+### Request 3
 
-Фактически проверено в этом чате:
+- `HTTP 200`
+- `~1.01s`
 
-- `git status` clean;
-- ветка `ahead 25`;
-- `tests/test_users.py` и `tests/test_admin_routes.py` на месте;
-- `tests/test_auth.py` расширен regression coverage;
-- `apps/admin_api/main.py` не падает без `static/admin`;
-- `docker/Caddyfile` содержит exact-match handlers для `/admin` и `/widget`;
-- `.dockerignore` режет frontend build artifacts.
+Вывод:
 
-Целевые локальные прогоны, подтверждённые здесь:
+- root cause закрыт;
+- обе зависимости healthy;
+- `/health` стабильно возвращает `200`.
 
-- `pytest tests/ -o addopts="" -m "not integration" -q --tb=short`
-  - результат: **`163 passed, 8 skipped, 28 deselected`** (полный unit suite)
-- `pytest tests/test_auth.py tests/test_users.py tests/test_admin_routes.py -q`
-  - результат: `23 passed, 25 skipped`
-- `pytest tests/test_auth.py -q`
-  - результат: `7 passed, 9 skipped`
+## 6. Что теперь считать baseline
 
-Из пользовательского статуса:
+Считать эталонным только это состояние:
 
-- **unit suite:** `163 passed, 8 skipped, 28 deselected` (актуальный прогон; deselected = integration tests)
-- **integration:** локально недоступен (нет Postgres/Redis)
+- entrypoint через `python -m ...`
+- `connectivity ON`
+- `vpc.user` присутствует
+- SG с `198.19.0.0/16` правилами присутствует
+- `/health = 200`
 
-Важно: полный integration suite локально зависит от доступных Postgres/Redis. В текущем окружении они не запущены — integration path не прогонялся.
+Не откатываться к старому baseline `connectivity OFF`, кроме случаев отдельной controlled диагностики.
 
-## 6. Миграции и данные
+## 7. Следующий practical focus
 
-Новые миграции:
+Critical infra-debug завершен. Дальше логичный порядок:
 
-- `migrations/versions/004_add_telegram_user_tenants.py`
-- `migrations/versions/005_add_admin_tables.py`
+1. Smoke admin contour
+2. Smoke public/widget contour
+3. Проверка tenant provisioning flow
+4. Проверка order/payment flow
+5. Отдельно, если нужно, проверить `migration_runner`
 
-С setup token lifecycle есть важные инварианты:
+То есть следующий фокус уже не на сетевом path, а на functional verification.
 
-- `bootstrap_tenant()` не должен перегенерировать token, если у админа уже есть `password_hash`;
-- `scripts/set_admin_password.py` не должен трогать `setup_token`, если пароль уже существовал.
+## 8. Что не делать
 
-## 7. Что уже покрыто тестами
+- не откатывать SG rules для `198.19.0.0/16`, пока не найден другой документированный и проверенный механизм;
+- не возвращать старые entrypoints `python scripts/run_admin.py` / `python scripts/run_public.py` для этого image;
+- не тащить обратно Terraform к управлению MDB/Redis/Lockbox versions ради “чистоты”;
+- не делать ручные `.tf` правки на VM как source of truth;
+- не добавлять временные `allUsers`, forced labels, forced revision env;
+- не трогать image tags без отдельной необходимости;
+- не трогать `migration_runner`, если задача не про миграции.
 
-### Auth
+## 9. Безопасность
 
-Покрыто:
+В ходе deploy/debug цикла секреты и ключи уже засвечивались в операционном процессе. Их по-прежнему нужно считать скомпрометированными и ротировать отдельно.
 
-- first-login через `setup_token`;
-- отказ без token;
-- отказ с неверным token;
-- subsequent login по паролю;
-- `/auth/me`;
-- logout + cookie clearing;
-- `401` после logout;
-- login rate limiter;
-- startup admin app без static directory.
+Минимум под ротацию:
 
-### Users
+- DB password
+- Redis password
+- JWT secret
+- Telegram token
+- YooKassa secret
+- SA/backend access keys, если они попадали в логи, временные файлы или shell history
 
-Покрыто:
+## 10. Важные файлы для продолжения
 
-- Pydantic validation `UserCreate/UserUpdate`;
-- phone normalization;
-- role validation;
-- list/create/update/soft-delete;
-- `404` / `422` scenarios.
-
-### Admin routes
-
-Покрыто:
-
-- settings get/update;
-- working hours;
-- onboarding status;
-- onboarding complete;
-- audit log;
-- audit filters.
-
-### Integration / infra
-
-Покрыто:
-
-- bootstrap / Redis smoke;
-- revoked-token post-logout;
-- bot tenant routing;
-- staging integration workflow.
-
-## 8. На что смотреть первым делом, если продолжаем
-
-Если работа идёт по admin/auth/integration/deploy, сначала читать актуальные файлы:
-
-- `apps/admin_api/main.py`
-- `api/routes/auth.py`
-- `api/routes/users.py`
-- `api/routes/settings.py`
-- `api/routes/onboarding.py`
-- `api/routes/audit.py`
-- `shared/mvp_bootstrap.py`
-- `shared/jwt_utils.py`
-- `shared/auth_dependencies.py`
-- `.github/workflows/ci.yml`
-- `.github/workflows/integration-staging.yml`
-- `docker/Caddyfile`
-
-Не опираться на старые handoff-заметки или раннее состояние дерева.
-
-## 9. Открытые практические темы
-
-На текущий момент не выглядит как авария, но это нормальные следующие зоны работы:
-
-1. ✅ Прогнать полный локальный unit suite — **выполнено**, `163 passed, 8 skipped, 28 deselected`.
-2. ✅ Добавить `pytest.mark.integration` к integration-тестам (`test_auth.py`, `test_users.py`, `test_admin_routes.py`) — **выполнено**.
-3. ⏳ Прогнать integration path на доступных Postgres/Redis или через staging workflow.
-4. ⏳ Сделать end-to-end pilot walkthrough:
-   - `provision_tenant.py`
-   - `upload_menu.py` / `seed_demo_tenant.py`
-   - first admin login
-   - webapp order flow
-   - payment flow
-   - logout/login retry
-5. ⏳ Дочистить и структурировать runbook/ops шаги, если пойдут новые деплойные изменения.
-
-## 10. Что не делать
-
-- не откатывать ничего вслепую;
-- не исходить из старого состояния admin/auth/deploy;
-- не смешивать новый функциональный diff с unrelated cleanup;
-- не ломать CLI provisioning возвратом к HTTP bootstrap;
-- не тащить frontend build artifacts в базовый Python image.
+- [shared/app_factory.py](C:/Users/Имярек/Downloads/restobot-main/shared/app_factory.py)
+- [shared/database.py](C:/Users/Имярек/Downloads/restobot-main/shared/database.py)
+- [shared/config.py](C:/Users/Имярек/Downloads/restobot-main/shared/config.py)
+- [shared/redis_client.py](C:/Users/Имярек/Downloads/restobot-main/shared/redis_client.py)
+- [scripts/run_admin.py](C:/Users/Имярек/Downloads/restobot-main/scripts/run_admin.py)
+- [scripts/run_public.py](C:/Users/Имярек/Downloads/restobot-main/scripts/run_public.py)
+- [infra/yc/containers.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/containers.tf)
+- [infra/yc/security-group-rules.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/security-group-rules.tf)
+- [infra/yc/service-account.tf](C:/Users/Имярек/Downloads/restobot-main/infra/yc/service-account.tf)
 
 ## 11. Готовый стартовый текст для нового чата
 
@@ -225,21 +264,23 @@ Admin app entrypoint:
 Используй HANDOFF.md как основной контекст.
 
 Работаем в `C:\Users\Имярек\Downloads\restobot-main`, ветка `codex/yc-mvp-deploy`.
-Working tree должен быть clean, ветка ahead of origin.
+Working tree не clean. Не откатывай infra-изменения вслепую.
+
+Главное:
+- YC critical infra-debug уже завершен
+- root cause /health 504 закрыт
+- текущее рабочее состояние: connectivity ON + vpc.user + SG rules для 198.19.0.0/16 + entrypoint через python -m
+- /health уже подтвержден как 200
 
 Сначала:
-1. проверь `git status`,
-2. подтверди текущее состояние по HANDOFF.md,
-3. только потом переходи к следующей инженерной задаче.
+1. прочитай HANDOFF.md,
+2. проверь `git status`,
+3. подтверди наличие infra/yc/security-group-rules.tf и runtime_vpc_user,
+4. только потом переходи к следующей functional/ops задаче.
 
-Если задача касается admin/auth/integration/deploy, сначала прочитай актуальные:
-- apps/admin_api/main.py
-- api/routes/auth.py
-- api/routes/users.py
-- api/routes/settings.py
-- api/routes/onboarding.py
-- api/routes/audit.py
-- shared/mvp_bootstrap.py
-- docker/Caddyfile
-- .github/workflows/integration-staging.yml
+Не делай:
+- ручные .tf правки на VM
+- allUsers invoker
+- forced revision labels/env
+- откат SG rules для 198.19.0.0/16
 ```

@@ -15,12 +15,12 @@ output "public_container_id" {
 
 output "db_host" {
   description = "Managed PostgreSQL host FQDN."
-  value       = local.db_host
+  value       = var.existing_db_host
 }
 
 output "redis_host" {
   description = "Managed Redis host FQDN."
-  value       = local.redis_host
+  value       = var.existing_redis_host
 }
 
 output "migration_container_url" {
