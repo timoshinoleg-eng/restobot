@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createOrder, createOrderPayment } from '@/api/client';
+import { createOrder, createOrderPayment, fetchWidgetConfig } from '@/api/client';
 import { useCart } from '@/context/CartContext';
 import { useSession } from '@/context/SessionContext';
 import { SessionForm } from './SessionForm';
@@ -20,6 +20,7 @@ export function OrderPage({ tenant }: { tenant: string }) {
   const [phone, setPhone] = useState('');
   const [comment, setComment] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'online'>('cash');
+  const [paymentsEnabled, setPaymentsEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<{
@@ -30,6 +31,17 @@ export function OrderPage({ tenant }: { tenant: string }) {
     paymentUrl: string | null;
     paymentError: string | null;
   } | null>(null);
+
+  useEffect(() => {
+    fetchWidgetConfig(tenant)
+      .then((cfg) => {
+        setPaymentsEnabled(cfg.payments_enabled);
+        if (!cfg.payments_enabled && paymentMethod === 'online') {
+          setPaymentMethod('cash');
+        }
+      })
+      .catch(() => setPaymentsEnabled(false));
+  }, [tenant]);
 
   useEffect(() => {
     if (!session || items.length === 0) return;
@@ -190,12 +202,12 @@ export function OrderPage({ tenant }: { tenant: string }) {
           <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)}>
             <option value="cash">Наличные</option>
             <option value="card">Картой при получении</option>
-            <option value="online">Онлайн</option>
+            {paymentsEnabled === true && <option value="online">Онлайн</option>}
           </select>
         </div>
-        {paymentMethod === 'online' && (
+        {paymentMethod === 'online' && paymentsEnabled === true && (
           <div className="info-banner">
-            После создания заказа откроется защищённая страница YooKassa для тестовой оплаты.
+            После создания заказа откроется защищённая страница YooKassa для оплаты.
           </div>
         )}
 

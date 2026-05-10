@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field
 from api.routes import menu, orders, payments
 from shared.app_factory import create_base_app
 from shared.auth_dependencies import bind_tenant_context, require_authenticated_user
+from shared.config import get_settings
 from shared.mvp_bootstrap import create_widget_session
+
+settings = get_settings()
 
 app = create_base_app(
     title="RestoBot Public API",
@@ -23,6 +26,12 @@ class WidgetSessionRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = Field(default=None, max_length=255)
+    consent_accepted: bool = False
+
+
+class WidgetConfigResponse(BaseModel):
+    payments_enabled: bool
+    currency: str = "RUB"
 
 
 @app.post("/widget/{tenant}/session", status_code=201)
@@ -34,7 +43,17 @@ async def widget_session(tenant: str, body: WidgetSessionRequest) -> dict[str, A
         name=body.name,
         phone=body.phone,
         email=body.email,
+        consent_accepted=body.consent_accepted,
     )
+
+
+@app.get("/widget/{tenant}/config")
+async def widget_config(tenant: str, request: Request) -> dict[str, Any]:
+    bind_tenant_context(request, tenant)
+    return {
+        "payments_enabled": settings.YOOKASSA_ENABLED,
+        "currency": "RUB",
+    }
 
 
 @app.get("/widget/{tenant}/menu")

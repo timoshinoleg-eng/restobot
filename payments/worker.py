@@ -2,6 +2,7 @@
 """Payment processing worker for ЮKassa integration."""
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
@@ -17,9 +18,18 @@ from shared.sql_utils import format_sql
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Configure ЮKassa
-Configuration.account_id = settings.YOOKASSA_SHOP_ID
-Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+# Configure ЮKassa lazily when enabled
+_yookassa_configured = False
+
+
+def _ensure_yookassa_config() -> None:
+    global _yookassa_configured
+    if not _yookassa_configured and settings.YOOKASSA_ENABLED:
+        if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
+            raise RuntimeError("YooKassa is enabled but SHOP_ID or SECRET_KEY is missing")
+        Configuration.account_id = settings.YOOKASSA_SHOP_ID
+        Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+        _yookassa_configured = True
 
 
 class PaymentWorker:
@@ -33,6 +43,9 @@ class PaymentWorker:
         self, tenant_schema: str, order_id: int, return_url: str
     ) -> dict[str, Any]:
         """Create ЮKassa payment with idempotency and return confirmation URL."""
+        if not settings.YOOKASSA_ENABLED:
+            raise RuntimeError("Online payments are disabled")
+        _ensure_yookassa_config()
         pool = await get_raw_pool()
         idempotency_key = str(uuid.uuid4())
 
@@ -52,6 +65,15 @@ class PaymentWorker:
                 amount = float(order["amount"]) - float(order.get("loyalty_used", 0))
                 if amount <= 0:
                     raise ValueError(f"Invalid payment amount for order {order_id}")
+
+                vat_code_result = conn.fetchval(
+                    format_sql(
+                        "SELECT vat_code FROM {}.restaurant_settings ORDER BY id LIMIT 1",
+                        tenant_schema,
+                    )
+                )
+                vat_code = await vat_code_result if inspect.isawaitable(vat_code_result) else vat_code_result
+                vat_code = int(vat_code or 1)
 
                 items_json: list[dict[str, Any]] = json.loads(order["items_json"])
                 item_ids = [
@@ -91,7 +113,7 @@ class PaymentWorker:
                         },
                         "payment_mode": "full_payment",
                         "payment_subject": "commodity",
-                        "vat_code": 1,  # 20% VAT
+                        "vat_code": vat_code,
                     }
                     for item in items_json
                 ]
@@ -151,6 +173,10 @@ class PaymentWorker:
 
     async def handle_webhook(self, tenant_schema: str, event: dict[str, Any]) -> None:
         """Handle ЮKassa webhook with idempotency guard."""
+        if not settings.YOOKASSA_ENABLED:
+            logger.warning("Webhook received but YooKassa is disabled")
+            return
+        _ensure_yookassa_config()
         payment_id = event["object"]["id"]
         event_type = event["event"]  # payment.succeeded, payment.canceled, etc.
         pool = await get_raw_pool()
@@ -171,6 +197,31 @@ class PaymentWorker:
 
                 if not order:
                     logger.warning("Order not found for payment %s", payment_id)
+                    return
+
+                event_inserted_result = conn.fetchval(
+                    format_sql(
+                        """
+                        INSERT INTO {}.payment_webhook_events (payment_id, event_type, payload)
+                        VALUES ($1, $2, $3::jsonb)
+                        ON CONFLICT (payment_id, event_type) DO NOTHING
+                        RETURNING id
+                        """,
+                        tenant_schema,
+                    ),
+                    payment_id,
+                    event_type,
+                    json.dumps(event),
+                )
+                event_inserted = (
+                    await event_inserted_result if inspect.isawaitable(event_inserted_result) else event_inserted_result
+                )
+                if event_inserted is None:
+                    logger.info(
+                        "Duplicate webhook ignored for payment %s event %s",
+                        payment_id,
+                        event_type,
+                    )
                     return
 
                 # Idempotency guard
@@ -213,6 +264,13 @@ class PaymentWorker:
                     logger.info("Order %s paid successfully", order["id"])
 
                 elif event_type == "payment.canceled":
+                    if order["payment_status"] == "paid":
+                        logger.warning(
+                            "Ignoring payment.canceled for already paid order %s",
+                            order["id"],
+                        )
+                        return
+
                     if float(order.get("loyalty_used", 0)) > 0:
                         await conn.execute(
                             format_sql(
@@ -243,6 +301,10 @@ class PaymentWorker:
 
     async def poll_payment_status(self, tenant_schema: str, payment_id: str, order_id: int) -> bool:
         """Poll ЮKassa for payment status as webhook fallback."""
+        if not settings.YOOKASSA_ENABLED:
+            logger.warning("Polling skipped: YooKassa is disabled")
+            return False
+        _ensure_yookassa_config()
         for _ in range(12):  # 12 attempts * 5s = 60s
             try:
                 payment = await asyncio.to_thread(Payment.find_one, payment_id)

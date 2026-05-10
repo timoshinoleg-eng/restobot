@@ -19,6 +19,7 @@ from shared.database import (
 )
 from shared.jwt_utils import is_revoked, verify_access_token
 from shared.logging_config import configure_logging, reset_request_id, set_request_id
+from shared.metrics import CONTENT_TYPE_LATEST, metrics_endpoint
 from shared.redis_client import check_redis_health, close_redis
 
 settings = get_settings()
@@ -161,6 +162,10 @@ def create_base_app(title: str, description: str, service_name: str) -> FastAPI:
     @app.get("/health")
     async def health_check() -> JSONResponse:
         return await build_health_response()
+
+    @app.get("/metrics")
+    async def prometheus_metrics() -> Response:
+        return Response(content=metrics_endpoint(), media_type=CONTENT_TYPE_LATEST)
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:

@@ -20,6 +20,7 @@ class RestaurantSettingsUpdate(BaseModel):
     restaurant_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     min_order_amount: Optional[float] = Field(default=None, ge=0)
     delivery_radius: Optional[float] = Field(default=None, ge=0)
+    vat_code: Optional[int] = Field(default=None, ge=1, le=6)
     currency: Optional[str] = Field(default=None, max_length=8)
 
 
@@ -82,6 +83,9 @@ async def update_settings(
     if body.delivery_radius is not None:
         fields.append("delivery_radius = $" + str(len(params) + 1))
         params.append(body.delivery_radius)
+    if body.vat_code is not None:
+        fields.append("vat_code = $" + str(len(params) + 1))
+        params.append(body.vat_code)
     if body.currency is not None:
         fields.append("currency = $" + str(len(params) + 1))
         params.append(body.currency)
@@ -105,8 +109,10 @@ async def update_settings(
     else:
         query = format_sql(
             f"""
-            INSERT INTO {{}}.restaurant_settings (restaurant_name, min_order_amount, delivery_radius, currency)
-            VALUES ($1, $2, COALESCE($3, 0), $4)
+            INSERT INTO {{}}.restaurant_settings (
+                restaurant_name, min_order_amount, delivery_radius, vat_code, currency
+            )
+            VALUES ($1, $2, COALESCE($3, 0), $4, $5)
             RETURNING *
             """,
             tenant_schema,
@@ -115,6 +121,7 @@ async def update_settings(
             body.restaurant_name or "Restaurant",
             body.min_order_amount or 0,
             body.delivery_radius,
+            body.vat_code or 1,
             body.currency or "RUB",
         ]
 

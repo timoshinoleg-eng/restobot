@@ -26,8 +26,14 @@ import redis.asyncio as redis
 from aiogram.fsm.storage.redis import RedisStorage
 
 from ai.rag_engine import RAGEngine
+from shared.consent import (
+    consent_text,
+    has_active_telegram_consent,
+    record_user_consent,
+)
 from shared.config import get_settings
 from shared.database import close_raw_pool, get_raw_pool, init_database
+from shared.redis_client import check_redis_health
 from shared.rate_limiter import RateLimiter
 from shared.sql_utils import format_sql
 from shared.telegram_user_tenants import (
@@ -64,6 +70,7 @@ rate_limiter = RateLimiter(limit=5, window=60)
 class UserFlow(StatesGroup):
     """Finite states for user interaction flow."""
 
+    consent = State()
     ai_recommend = State()
     order_type = State()
     order_address = State()
@@ -140,6 +147,62 @@ async def _require_tenant(message: Message, state: FSMContext) -> str | None:
         await message.answer(_MISSING_TENANT_TEXT)
         return None
     return tenant_id
+
+
+async def _send_consent_prompt(message: Message, tenant_id: str, state: FSMContext) -> None:
+    """Ask the user to accept personal-data processing before ordering."""
+    await state.update_data(tenant_id=tenant_id)
+    await state.set_state(UserFlow.consent)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Согласен", callback_data="consent_accept")],
+            [InlineKeyboardButton(text="Отказаться", callback_data="consent_decline")],
+        ]
+    )
+    await message.answer(
+        f"{consent_text()}\n\n"
+        "Без согласия ресторан не сможет принять заказ и связаться по доставке.",
+        reply_markup=keyboard,
+    )
+
+
+async def _ensure_consent(message: Message, state: FSMContext, tenant_id: str) -> bool:
+    """Require current consent version for customer-facing flows."""
+    if message.from_user is None:
+        return False
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+    if await has_active_telegram_consent(tenant_schema, message.from_user.id):
+        return True
+    await _send_consent_prompt(message, tenant_id, state)
+    return False
+
+
+async def _send_main_menu(message: Message, tenant_id: str, first_name: str | None) -> None:
+    """Send the main restaurant menu entrypoint."""
+    welcome_text = (
+        f"Привет, {first_name or 'гость'}!\n\n"
+        f"Я — AI-ассистент ресторана. Помогу:\n"
+        f"• Выбрать блюда по вашим предпочтениям\n"
+        f"• Оформить заказ на доставку или самовывоз\n"
+        f"• Накопить бонусные баллы\n"
+        f"• Забронировать столик\n\n"
+        f"Начнём?"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Посмотреть меню",
+                    web_app=WebAppInfo(url=f"https://app.chatbot24.su/{tenant_id}/menu"),
+                )
+            ],
+            [InlineKeyboardButton(text="AI-рекомендация", callback_data="ai_recommend")],
+            [InlineKeyboardButton(text="Мои заказы", callback_data="my_orders")],
+        ]
+    )
+
+    await message.answer(welcome_text, reply_markup=keyboard)
 
 
 def _telegram_external_ids(telegram_user_id: int) -> tuple[str, str]:
@@ -306,30 +369,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.update_data(tenant_id=tenant_id)
     logger.info("User %s linked to tenant %s", user.id, tenant_id)
 
-    welcome_text = (
-        f"👋 Привет, {user.first_name}!\n\n"
-        f"Я — AI-ассистент ресторана. Помогу:\n"
-        f"• 🍽️ Выбрать блюда по вашим предпочтениям\n"
-        f"• 📋 Оформить заказ на доставку или самовывоз\n"
-        f"• 🎁 Накопить бонусные баллы\n"
-        f"• 📅 Забронировать столик\n\n"
-        f"Начнём? 👇"
-    )
+    if not await _ensure_consent(message, state, tenant_id):
+        return
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🍽️ Посмотреть меню",
-                    web_app=WebAppInfo(url=f"https://app.chatbot24.su/{tenant_id}/menu"),
-                )
-            ],
-            [InlineKeyboardButton(text="🤖 AI-рекомендация", callback_data="ai_recommend")],
-            [InlineKeyboardButton(text="📋 Мои заказы", callback_data="my_orders")],
-        ]
-    )
-
-    await message.answer(welcome_text, reply_markup=keyboard)
+    await _send_main_menu(message, tenant_id, user.first_name)
 
 
 @router.message(Command("help"))
@@ -361,6 +404,43 @@ async def cmd_support(message: Message) -> None:
     )
 
 
+@router.callback_query(F.data == "consent_accept")
+async def process_consent_accept(callback: CallbackQuery, state: FSMContext) -> None:
+    """Persist personal-data consent and continue to the main menu."""
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    tenant_id = await _require_tenant(callback.message, state)
+    if tenant_id is None:
+        await callback.answer()
+        return
+
+    tenant_schema = settings.get_tenant_schema(tenant_id)
+    await record_user_consent(
+        tenant_schema,
+        telegram_user_id=callback.from_user.id,
+        external_id=f"tg-{callback.from_user.id}",
+        source="telegram",
+    )
+    await state.update_data(tenant_id=tenant_id)
+    await state.set_state(None)
+    await callback.message.edit_text("Согласие принято. Можно оформить заказ.")
+    await _send_main_menu(callback.message, tenant_id, callback.from_user.first_name)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "consent_decline")
+async def process_consent_decline(callback: CallbackQuery, state: FSMContext) -> None:
+    """Stop ordering flows when the user declines personal-data processing."""
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            "Без согласия на обработку персональных данных ресторан не сможет принять заказ. "
+            "Вы можете вернуться к этому шагу командой /start."
+        )
+    await state.set_state(None)
+    await callback.answer()
+
+
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, state: FSMContext) -> None:
     """Show menu categories with tenant-aware widget link."""
@@ -368,6 +448,8 @@ async def cmd_menu(message: Message, state: FSMContext) -> None:
         return
     tenant_id = await _require_tenant(message, state)
     if tenant_id is None:
+        return
+    if not await _ensure_consent(message, state, tenant_id):
         return
     await message.answer(
         "🍽️ *Наше меню:*\n\nВыберите категорию 👇",
@@ -392,6 +474,8 @@ async def cmd_cart(message: Message, state: FSMContext) -> None:
     tenant_id = await _require_tenant(message, state)
     if tenant_id is None:
         return
+    if not await _ensure_consent(message, state, tenant_id):
+        return
     await message.answer(
         f"🛒 *Ваша корзина*\n\n"
         f"Ресторан: {tenant_id}\n\n"
@@ -406,6 +490,8 @@ async def cmd_order(message: Message, state: FSMContext) -> None:
         return
     tenant_id = await _require_tenant(message, state)
     if tenant_id is None:
+        return
+    if not await _ensure_consent(message, state, tenant_id):
         return
     await state.set_state(UserFlow.order_type)
     await message.answer(
@@ -520,7 +606,14 @@ async def process_delete_account(callback: CallbackQuery, state: FSMContext) -> 
 @router.callback_query(F.data == "ai_recommend")
 async def process_ai_recommend(callback: CallbackQuery, state: FSMContext) -> None:
     """Start AI recommendation flow."""
-    if callback.message is None:
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    tenant_id = await _require_tenant(callback.message, state)
+    if tenant_id is None:
+        await callback.answer()
+        return
+    if not await _ensure_consent(callback.message, state, tenant_id):
         await callback.answer()
         return
     await state.set_state(UserFlow.ai_recommend)
@@ -630,6 +723,21 @@ def main() -> None:
     if settings.TELEGRAM_WEBHOOK_URL:
         # Webhook mode (production)
         app = web.Application()
+
+        async def health(_: web.Request) -> web.Response:
+            redis_health = await check_redis_health()
+            status_value = "ok" if redis_health.get("status") == "healthy" else "error"
+            return web.json_response(
+                {
+                    "status": status_value,
+                    "redis": redis_health,
+                    "version": settings.APP_VERSION,
+                    "environment": settings.ENVIRONMENT,
+                },
+                status=200 if status_value == "ok" else 503,
+            )
+
+        app.router.add_get("/health", health)
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,

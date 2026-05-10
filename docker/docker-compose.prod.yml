@@ -47,8 +47,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       YC_FOLDER_ID: ${YC_FOLDER_ID}
       YC_IAM_TOKEN: ${YC_IAM_TOKEN}
-      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
-      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      YOOKASSA_ENABLED: ${YOOKASSA_ENABLED:-false}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_WEBHOOK_SECRET: ${YOOKASSA_WEBHOOK_SECRET:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       YC_OBJECT_STORAGE_BUCKET: ${YC_OBJECT_STORAGE_BUCKET}
       YC_OBJECT_STORAGE_ENDPOINT: ${YC_OBJECT_STORAGE_ENDPOINT}
@@ -92,8 +94,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       YC_FOLDER_ID: ${YC_FOLDER_ID}
       YC_IAM_TOKEN: ${YC_IAM_TOKEN}
-      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
-      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      YOOKASSA_ENABLED: ${YOOKASSA_ENABLED:-false}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_WEBHOOK_SECRET: ${YOOKASSA_WEBHOOK_SECRET:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       YC_OBJECT_STORAGE_BUCKET: ${YC_OBJECT_STORAGE_BUCKET}
       YC_OBJECT_STORAGE_ENDPOINT: ${YC_OBJECT_STORAGE_ENDPOINT}
@@ -134,18 +138,24 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       YC_FOLDER_ID: ${YC_FOLDER_ID}
       YC_IAM_TOKEN: ${YC_IAM_TOKEN}
-      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
-      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY}
+      YOOKASSA_ENABLED: ${YOOKASSA_ENABLED:-false}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_WEBHOOK_SECRET: ${YOOKASSA_WEBHOOK_SECRET:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
-      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
       TELEGRAM_BOT_DEFAULT_TENANT_ID: ${TELEGRAM_BOT_DEFAULT_TENANT_ID:-}
       YC_OBJECT_STORAGE_BUCKET: ${YC_OBJECT_STORAGE_BUCKET}
       YC_OBJECT_STORAGE_ENDPOINT: ${YC_OBJECT_STORAGE_ENDPOINT}
     networks:
       - restobot
     healthcheck:
-      disable: true
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - admin
       - public
@@ -155,6 +165,25 @@ services:
           memory: 256M
         reservations:
           memory: 96M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  backup:
+    image: ${ADMIN_IMAGE}
+    command: ["python", "scripts/backup_db.py"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      YC_OBJECT_STORAGE_BUCKET: ${YC_OBJECT_STORAGE_BUCKET}
+      YC_OBJECT_STORAGE_ENDPOINT: ${YC_OBJECT_STORAGE_ENDPOINT:-https://storage.yandexcloud.net}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    networks:
+      - restobot
+    profiles:
+      - backup
     logging:
       driver: "json-file"
       options:

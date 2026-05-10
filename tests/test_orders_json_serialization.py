@@ -58,5 +58,5 @@ async def test_create_order_serializes_items_json_for_insert() -> None:
             response = await create_order(request, body)
 
     assert response["id"] == 123  # nosec B101
-    insert_call = conn.fetchval.await_args_list[0]
+    insert_call = conn.fetchval.await_args_list[-1]
     assert insert_call.args[8] == '[{"menu_item_id": 1, "quantity": 1, "modifiers": null, "price": 250.0}]'  # nosec B101

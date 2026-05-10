@@ -82,3 +82,7 @@ frontend/webapp/node_modules/
 
 *.tar.gz
 
+
+.tmpdeploy/
+infra/yc/terraform.tfvars.pilot
+infra/yc/deploy.tfplan

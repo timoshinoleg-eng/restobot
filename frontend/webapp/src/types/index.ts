@@ -61,6 +61,11 @@ export interface PaymentSession {
   status: string;
 }
 
+export interface WidgetConfig {
+  payments_enabled: boolean;
+  currency: string;
+}
+
 export interface TelegramUser {
   id: number;
   first_name: string;

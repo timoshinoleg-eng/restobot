@@ -24,9 +24,11 @@ class TestPaymentWorker:
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("payments.worker.get_raw_pool", return_value=mock_pool):
-            with pytest.raises(ValueError, match="not found"):
-                await worker.process_payment("tenant_test", 999, "http://return")
+        with patch("payments.worker.settings.YOOKASSA_ENABLED", True):
+            with patch("payments.worker._ensure_yookassa_config"):
+                with patch("payments.worker.get_raw_pool", return_value=mock_pool):
+                    with pytest.raises(ValueError, match="not found"):
+                        await worker.process_payment("tenant_test", 999, "http://return")
 
     @pytest.mark.asyncio
     async def test_handle_webhook_order_not_found(self, worker: PaymentWorker) -> None:
@@ -37,18 +39,21 @@ class TestPaymentWorker:
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("payments.worker.get_raw_pool", return_value=mock_pool):
-            # Should not raise
-            await worker.handle_webhook(
-                "tenant_test",
-                {"object": {"id": "pay_123"}, "event": "payment.succeeded"},
-            )
+        with patch("payments.worker.settings.YOOKASSA_ENABLED", True):
+            with patch("payments.worker._ensure_yookassa_config"):
+                with patch("payments.worker.get_raw_pool", return_value=mock_pool):
+                    # Should not raise
+                    await worker.handle_webhook(
+                        "tenant_test",
+                        {"object": {"id": "pay_123"}, "event": "payment.succeeded"},
+                    )
 
     @pytest.mark.asyncio
     async def test_poll_payment_status_timeout(self, worker: PaymentWorker) -> None:
         """Polling should return False after max attempts."""
-        with patch("payments.worker.Payment.find_one") as mock_find:
-            mock_find.return_value = MagicMock(status="pending")
-            with patch("payments.worker.asyncio.sleep", new_callable=AsyncMock):
-                result = await worker.poll_payment_status("tenant_test", "pay_123", 1)
+        with patch("payments.worker.settings.YOOKASSA_ENABLED", True):
+            with patch("payments.worker.Payment.find_one") as mock_find:
+                mock_find.return_value = MagicMock(status="pending")
+                with patch("payments.worker.asyncio.sleep", new_callable=AsyncMock):
+                    result = await worker.poll_payment_status("tenant_test", "pay_123", 1)
         assert result is False  # nosec B101

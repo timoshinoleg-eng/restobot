@@ -1,6 +1,8 @@
 """Tests for cloud-facing admin and public FastAPI applications."""
 
 from unittest.mock import AsyncMock, patch
+import hashlib
+import hmac
 
 import pytest
 from fastapi.testclient import TestClient
@@ -273,7 +275,8 @@ class TestPublicAPI:
         assert response.json()["detail"] == "Authentication required"  # nosec B101
 
     def test_widget_create_payment_requires_authentication(self, public_client: TestClient) -> None:
-        response = public_client.post("/api/v1/test/orders/5/payment")
+        with patch("api.routes.payments.settings.YOOKASSA_ENABLED", True):
+            response = public_client.post("/api/v1/test/orders/5/payment")
 
         assert response.status_code == 401  # nosec B101
         assert response.json()["detail"] == "Authentication required"  # nosec B101
@@ -293,14 +296,15 @@ class TestPublicAPI:
             "status": "pending",
         }
 
-        with patch("api.routes.payments.get_raw_pool", new_callable=AsyncMock) as get_raw_pool:
-            mock_pool = get_raw_pool.return_value
-            mock_pool.fetchrow = AsyncMock(return_value=order_row)
-            with patch(
-                "api.routes.payments.worker.process_payment",
-                AsyncMock(return_value=mocked),
-            ) as process_payment:
-                response = public_client.post("/api/v1/test/orders/5/payment", headers=headers)
+        with patch("api.routes.payments.settings.YOOKASSA_ENABLED", True):
+            with patch("api.routes.payments.get_raw_pool", new_callable=AsyncMock) as get_raw_pool:
+                mock_pool = get_raw_pool.return_value
+                mock_pool.fetchrow = AsyncMock(return_value=order_row)
+                with patch(
+                    "api.routes.payments.worker.process_payment",
+                    AsyncMock(return_value=mocked),
+                ) as process_payment:
+                    response = public_client.post("/api/v1/test/orders/5/payment", headers=headers)
 
         assert response.status_code == 200  # nosec B101
         assert response.json() == mocked  # nosec B101
@@ -358,10 +362,17 @@ class TestPublicAPI:
 
     def test_yookassa_webhook_route_is_exposed(self, public_client: TestClient) -> None:
         payload = {"object": {"metadata": {"tenant_schema": "tenant_test"}}}
+        body = b'{"object":{"metadata":{"tenant_schema":"tenant_test"}}}'
+        secret = "x" * 32
+        signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
-        with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", None):
+        with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", secret):
             with patch("api.routes.payments.worker.handle_webhook", AsyncMock()) as handle_webhook:
-                response = public_client.post("/api/v1/test/webhook/yookassa", json=payload)
+                response = public_client.post(
+                    "/api/v1/test/webhook/yookassa",
+                    content=body,
+                    headers={"X-Webhook-Signature": signature},
+                )
 
         assert response.status_code == 200  # nosec B101
         assert response.json() == {"status": "ok"}  # nosec B101

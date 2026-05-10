@@ -4,6 +4,7 @@ import type {
   OrderCreatePayload,
   OrderResponse,
   PaymentSession,
+  WidgetConfig,
   WidgetSession,
 } from '@/types';
 
@@ -47,11 +48,12 @@ export async function createWidgetSession(
   externalId: string,
   name: string,
   phone: string | null,
-  email?: string | null
+  email?: string | null,
+  consentAccepted = false
 ): Promise<WidgetSession> {
   return fetchJson<WidgetSession>(`/widget/${tenant}/session`, {
     method: 'POST',
-    body: JSON.stringify({ external_id: externalId, name, phone, email }),
+    body: JSON.stringify({ external_id: externalId, name, phone, email, consent_accepted: consentAccepted }),
   });
 }
 
@@ -72,6 +74,10 @@ export async function createOrder(tenant: string, payload: OrderCreatePayload): 
 
 export async function fetchOrder(tenant: string, orderId: number): Promise<OrderResponse> {
   return fetchJson<OrderResponse>(`/widget/${tenant}/orders/${orderId}`);
+}
+
+export async function fetchWidgetConfig(tenant: string): Promise<WidgetConfig> {
+  return fetchJson<WidgetConfig>(`/widget/${tenant}/config`);
 }
 
 export async function createOrderPayment(tenant: string, orderId: number): Promise<PaymentSession> {

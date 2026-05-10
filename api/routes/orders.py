@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from shared.audit_utils import log_audit
+from shared.consent import has_active_consent
 from shared.auth_dependencies import require_admin_user
 from shared.config import get_settings
 from shared.database import get_raw_pool
@@ -160,8 +161,14 @@ async def create_order(request: Request, body: OrderCreateRequest) -> Any:
     # Generate order number using cryptographically secure random
     order_number = f"R-{datetime.now().strftime('%y%m%d')}-" f"{secrets.randbelow(9000) + 1000}"
 
+    if body.payment_method == "online" and not settings.YOOKASSA_ENABLED:
+        raise HTTPException(status_code=422, detail="Online payment is not available")
+
     async with pool.acquire() as conn:
         async with conn.transaction():
+            if not await has_active_consent(tenant_schema, body.user_id, conn):
+                raise HTTPException(status_code=403, detail="Personal data consent required")
+
             # Idempotency check
             idempotency_key = request.headers.get("Idempotency-Key")
             if idempotency_key:

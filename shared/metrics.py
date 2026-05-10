@@ -1,7 +1,7 @@
 # shared/metrics.py
 """Prometheus metrics for RestoBot services."""
 
-from prometheus_client import Counter, Histogram, Info, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, Info, generate_latest
 
 APP_INFO = Info("restobot_app", "Application information")
 APP_INFO.info({"version": "1.0.0"})

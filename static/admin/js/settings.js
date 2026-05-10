@@ -7,6 +7,7 @@ async function initSettings() {
     document.getElementById('restName').value = rs.restaurant_name || '';
     document.getElementById('minOrder').value = rs.min_order_amount || 0;
     document.getElementById('deliveryRadius').value = rs.delivery_radius || 0;
+    document.getElementById('vatCode').value = rs.vat_code || 1;
     document.getElementById('currency').value = rs.currency || 'RUB';
 
     const wh = data.working_hours || [];
@@ -38,6 +39,7 @@ async function initSettings() {
         restaurant_name: document.getElementById('restName').value || null,
         min_order_amount: parseFloat(document.getElementById('minOrder').value) || 0,
         delivery_radius: parseFloat(document.getElementById('deliveryRadius').value) || null,
+        vat_code: parseInt(document.getElementById('vatCode').value, 10) || 1,
         currency: document.getElementById('currency').value || 'RUB',
       });
       UI.showToast('Настройки сохранены');

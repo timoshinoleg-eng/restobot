@@ -44,9 +44,11 @@ class TestPaymentSuccess:
         mock_payment.confirmation.confirmation_url = "https://pay.url"
         mock_payment.status = "pending"
 
-        with patch("payments.worker.get_raw_pool", return_value=mock_pool):
-            with patch("payments.worker.Payment.create", return_value=mock_payment):
-                result = await worker.process_payment("tenant_test", 1, "http://return")
+        with patch("payments.worker.settings.YOOKASSA_ENABLED", True):
+            with patch("payments.worker._ensure_yookassa_config"):
+                with patch("payments.worker.get_raw_pool", return_value=mock_pool):
+                    with patch("payments.worker.Payment.create", return_value=mock_payment):
+                        result = await worker.process_payment("tenant_test", 1, "http://return")
 
         assert result["payment_id"] == "pay_123"  # nosec B101
         assert result["confirmation_url"] == "https://pay.url"  # nosec B101

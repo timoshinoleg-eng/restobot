@@ -31,13 +31,14 @@ class TestWebhookSignature:
         with patch("shared.config.get_settings") as mock_settings:
             cfg = get_settings()
             mock_settings.return_value = cfg
-            with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", secret):
-                with patch("payments.worker.PaymentWorker.handle_webhook", new_callable=AsyncMock):
-                    response = client.post(
-                        "/api/v1/test/webhook/yookassa",
-                        headers={"X-Webhook-Signature": sig},
-                        content=body,
-                    )
+            with patch("api.routes.payments.settings.YOOKASSA_ENABLED", True):
+                with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", secret):
+                    with patch("payments.worker.PaymentWorker.handle_webhook", new_callable=AsyncMock):
+                        response = client.post(
+                            "/api/v1/test/webhook/yookassa",
+                            headers={"X-Webhook-Signature": sig},
+                            content=body,
+                        )
         assert response.status_code == 200  # nosec B101
 
     def test_invalid_signature_rejected(self, client: TestClient) -> None:
@@ -45,11 +46,12 @@ class TestWebhookSignature:
         body = b'{"event":"payment.succeeded"}'
         secret = "test-secret"
 
-        with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", secret):
-            response = client.post(
-                "/api/v1/test/webhook/yookassa",
-                headers={"X-Webhook-Signature": "bad-sig"},
-                content=body,
-            )
+        with patch("api.routes.payments.settings.YOOKASSA_ENABLED", True):
+            with patch("api.routes.payments.settings.YOOKASSA_WEBHOOK_SECRET", secret):
+                response = client.post(
+                    "/api/v1/test/webhook/yookassa",
+                    headers={"X-Webhook-Signature": "bad-sig"},
+                    content=body,
+                )
         assert response.status_code == 400  # nosec B101
         assert response.json()["detail"] == "Invalid signature"  # nosec B101

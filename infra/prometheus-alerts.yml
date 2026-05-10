@@ -1,0 +1,56 @@
+groups:
+  - name: restobot
+    interval: 30s
+    rules:
+      - alert: RestoBotServiceDown
+        expr: up{job=~"restobot-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RestoBot service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 2 minutes."
+
+      - alert: RestoBotErrorRateHigh
+        expr: |
+          sum(rate(restobot_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(restobot_http_requests_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RestoBot error rate is high"
+          description: "Error rate exceeds 1% for 5 minutes on {{ $labels.job }}."
+
+      - alert: RestoBotDbPoolExhausted
+        expr: |
+          restobot_database_pool_idle / restobot_database_pool_size < 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection pool nearly exhausted"
+          description: "Less than 20% idle connections in {{ $labels.job }} pool."
+
+      - alert: RestoBotLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(restobot_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency exceeds 2 seconds"
+          description: "99th percentile latency is above 2s for 5 minutes."
+
+      - alert: RestoBotBackupMissing
+        expr: |
+          time() - s3_last_modified_timestamp{bucket=~"restobot-backups"} > 25 * 3600
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Daily database backup is missing"
+          description: "No new backup object in S3 for more than 25 hours."

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from passlib.context import CryptContext
 
 from shared.config import get_settings
+from shared.consent import attach_telegram_consent_to_user, record_user_consent
 from shared.database import get_raw_pool
 from shared.jwt_utils import create_access_token
 from shared.sql_utils import format_sql
@@ -63,6 +64,7 @@ TENANT_SCHEMA_STATEMENTS = [
         min_order_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
         delivery_radius NUMERIC(12,2) DEFAULT 0,
         setup_token VARCHAR(64),
+        vat_code INT NOT NULL DEFAULT 1,
         currency VARCHAR(8) NOT NULL DEFAULT 'RUB',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -186,6 +188,44 @@ TENANT_SCHEMA_STATEMENTS = [
         payload JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.payment_webhook_events (
+        id BIGSERIAL PRIMARY KEY,
+        payment_id VARCHAR(128) NOT NULL,
+        event_type VARCHAR(64) NOT NULL,
+        payload JSONB NOT NULL,
+        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (payment_id, event_type)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS {}.user_consents (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT REFERENCES {}.users(id) ON DELETE SET NULL,
+        telegram_user_id BIGINT,
+        external_id VARCHAR(128),
+        consent_version INT NOT NULL,
+        consent_hash VARCHAR(64) NOT NULL,
+        source VARCHAR(32) NOT NULL,
+        agreed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMPTZ
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_consents_external_active
+    ON {}.user_consents (consent_version, source, external_id)
+    WHERE external_id IS NOT NULL AND revoked_at IS NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_user_consents_user_active
+    ON {}.user_consents (user_id, consent_version)
+    WHERE revoked_at IS NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_user_consents_telegram_active
+    ON {}.user_consents (telegram_user_id, consent_version)
+    WHERE telegram_user_id IS NOT NULL AND revoked_at IS NULL
     """,
     """
     CREATE TABLE IF NOT EXISTS {}.audit_log (
@@ -540,6 +580,7 @@ async def create_widget_session(
     name: str,
     phone: Optional[str],
     email: Optional[str],
+    consent_accepted: bool = False,
 ) -> dict[str, Any]:
     """Create or update a widget user session and return a JWT."""
     tenant_schema = await require_existing_tenant_schema(tenant_id)
@@ -567,6 +608,28 @@ async def create_widget_session(
         )
 
     assert user_row is not None
+    telegram_user_id: Optional[int] = None
+    if external_id.startswith("tg-"):
+        try:
+            telegram_user_id = int(external_id[3:])
+        except ValueError:
+            telegram_user_id = None
+
+    await attach_telegram_consent_to_user(
+        tenant_schema,
+        user_id=int(user_row["id"]),
+        telegram_user_id=telegram_user_id,
+        external_id=external_id,
+    )
+    if consent_accepted:
+        await record_user_consent(
+            tenant_schema,
+            user_id=int(user_row["id"]),
+            telegram_user_id=telegram_user_id,
+            external_id=external_id,
+            source="widget",
+        )
+
     access_token = create_access_token(
         user_id=int(user_row["id"]),
         tenant_id=tenant_id,

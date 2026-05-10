@@ -24,6 +24,8 @@ worker = PaymentWorker()
 @router.post("/orders/{order_id}/payment")
 async def create_yookassa_payment(tenant: str, order_id: int, request: Request) -> dict[str, Any]:
     """Create a redirect payment for an existing online order."""
+    if not settings.YOOKASSA_ENABLED:
+        raise HTTPException(status_code=503, detail="Online payments are currently disabled")
     bind_tenant_context(request, tenant)
     require_authenticated_user(request)
 
@@ -63,15 +65,19 @@ async def create_yookassa_payment(tenant: str, order_id: int, request: Request) 
 
 @router.post("/webhook/yookassa")
 async def yookassa_webhook(tenant: str, request: Request) -> dict[str, str]:
-    """Handle ЮKassa webhook with optional HMAC signature verification."""
+    """Handle ЮKassa webhook with mandatory HMAC signature verification."""
+    if not settings.YOOKASSA_ENABLED:
+        raise HTTPException(status_code=503, detail="Online payments are currently disabled")
     bind_tenant_context(request, tenant)
     body = await request.body()
     secret = settings.YOOKASSA_WEBHOOK_SECRET
-    if secret:
-        sig = request.headers.get("X-Webhook-Signature", "")
-        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            raise HTTPException(status_code=400, detail="Invalid signature")
+    if not secret:
+        logger.error("YOOKASSA_WEBHOOK_SECRET is not configured")
+        raise HTTPException(status_code=500, detail="Webhook secret is not configured")
+    sig = request.headers.get("X-Webhook-Signature", "")
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
     event: dict[str, Any] = json.loads(body)
     tenant_schema = request.state.tenant_schema

@@ -9,6 +9,7 @@ export function SessionForm({ tenant }: { tenant: string }) {
   const { user: tgUser } = useTelegram();
   const [name, setName] = useState(tgUser?.first_name || '');
   const [phone, setPhone] = useState('');
+  const [consentAccepted, setConsentAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,11 +24,15 @@ export function SessionForm({ tenant }: { tenant: string }) {
       setError('Введите корректный номер телефона');
       return;
     }
+    if (!consentAccepted) {
+      setError('Подтвердите согласие на обработку персональных данных');
+      return;
+    }
     setLoading(true);
     try {
       const uuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const externalId = tgUser?.id ? `tg-${tgUser.id}` : `webapp-${uuid}`;
-      const session = await createWidgetSession(tenant, externalId, name.trim(), phone.trim() || null);
+      const session = await createWidgetSession(tenant, externalId, name.trim(), phone.trim() || null, null, consentAccepted);
       setSession(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка входа');
@@ -51,6 +56,14 @@ export function SessionForm({ tenant }: { tenant: string }) {
           <label>Телефон</label>
           <input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="+7 (999) 000-00-00" type="tel" />
         </div>
+        <label className="checkbox-row">
+          <input
+            checked={consentAccepted}
+            onChange={(e) => setConsentAccepted(e.target.checked)}
+            type="checkbox"
+          />
+          <span>Согласен на обработку персональных данных для оформления заказа и доставки</span>
+        </label>
         <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: '100%' }}>
           {loading ? 'Вход…' : 'Продолжить'}
         </button>

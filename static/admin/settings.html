@@ -15,6 +15,17 @@
         <div class="form-group"><label>Название</label><input id="restName"></div>
         <div class="form-group"><label>Мин. сумма заказа</label><input id="minOrder" type="number" step="0.01"></div>
         <div class="form-group"><label>Радиус доставки (км)</label><input id="deliveryRadius" type="number" step="0.1"></div>
+        <div class="form-group">
+          <label>НДС в чеке ЮKassa</label>
+          <select id="vatCode">
+            <option value="1">20%</option>
+            <option value="2">10%</option>
+            <option value="3">0%</option>
+            <option value="4">Без НДС</option>
+            <option value="5">20/120</option>
+            <option value="6">10/110</option>
+          </select>
+        </div>
         <div class="form-group"><label>Валюта</label><input id="currency" maxlength="8"></div>
         <button type="submit" class="btn btn-primary">Сохранить</button>
       </form>

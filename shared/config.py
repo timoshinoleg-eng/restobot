@@ -65,15 +65,21 @@ class Settings(BaseSettings):
     YANDEXGPT_TIMEOUT: float = 5.0
     YANDEXGPT_EMBED_TIMEOUT: float = 2.0
 
-    YOOKASSA_SHOP_ID: str = Field(
-        validation_alias=AliasChoices("YOOKASSA_SHOP_ID", "YOKASSA_SHOP_ID")
+    YOOKASSA_ENABLED: bool = False
+    YOOKASSA_SHOP_ID: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("YOOKASSA_SHOP_ID", "YOKASSA_SHOP_ID"),
     )
-    YOOKASSA_SECRET_KEY: str = Field(
-        validation_alias=AliasChoices("YOOKASSA_SECRET_KEY", "YOKASSA_SECRET_KEY")
+    YOOKASSA_SECRET_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("YOOKASSA_SECRET_KEY", "YOKASSA_SECRET_KEY"),
     )
     YOOKASSA_RETURN_URL: str = "https://t.me/restobot_bot"
     YOOKASSA_TIMEOUT: float = 10.0
-    YOOKASSA_WEBHOOK_SECRET: Optional[str] = None
+    YOOKASSA_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("YOOKASSA_WEBHOOK_SECRET", "YOKASSA_WEBHOOK_SECRET"),
+    )
 
     COMPLIANCE_CONSENT_VERSION: int = 1
     COMPLIANCE_DATA_RETENTION_DAYS: int = 1825
@@ -131,6 +137,24 @@ class Settings(BaseSettings):
                 self.REDIS_URL = f"{redis_scheme}://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
             else:
                 self.REDIS_URL = f"redis://localhost:6379/{self.REDIS_DB}"
+
+        if self.ENVIRONMENT == "production":
+            if self.YOOKASSA_ENABLED:
+                if not self.YOOKASSA_SHOP_ID:
+                    raise ValueError("YOOKASSA_SHOP_ID is required when YOOKASSA_ENABLED is true")
+                if not self.YOOKASSA_SECRET_KEY:
+                    raise ValueError("YOOKASSA_SECRET_KEY is required when YOOKASSA_ENABLED is true")
+                if not self.YOOKASSA_WEBHOOK_SECRET or len(self.YOOKASSA_WEBHOOK_SECRET) < 32:
+                    raise ValueError(
+                        "YOOKASSA_WEBHOOK_SECRET must be set to at least 32 characters in production"
+                    )
+            if self.TELEGRAM_WEBHOOK_URL and (
+                not self.TELEGRAM_WEBHOOK_SECRET or len(self.TELEGRAM_WEBHOOK_SECRET) < 32
+            ):
+                raise ValueError(
+                    "TELEGRAM_WEBHOOK_SECRET must be set to at least 32 characters in production "
+                    "when TELEGRAM_WEBHOOK_URL is configured"
+                )
 
         return self
 

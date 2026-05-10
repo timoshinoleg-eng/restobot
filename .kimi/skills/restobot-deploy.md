@@ -263,6 +263,10 @@ curl -s -o /dev/null -w "https_widget:%{http_code}\n" --insecure https://app.cha
 2. Add Caddy `handle /api/v2/* { reverse_proxy public:8001 }` if needed (usually `/api/*` already covers it).
 3. Restart affected service only: `cd /opt/restobot && docker compose -f docker-compose.prod.yml --env-file .env.prod restart admin` (или `public`).
 
+Important:
+- for **VM docker-compose**, service names are `admin` and `public`;
+- names `admin_api` and `public_api` refer to **YC Serverless Containers / Terraform** resources, not compose services.
+
 ### Переключиться с HTTP-only на HTTPS (новый домен)
 1. Ensure A-record points to VM IP.
 2. Replace HTTP-only Caddyfile with production template (remove `auto_https off`, add `DOMAIN` block).

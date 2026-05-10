@@ -138,3 +138,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 cd /opt/restobot
 docker compose -f docker-compose.prod.yml --env-file .env.prod restart admin public
 ```
+
+Важно:
+
+- для **VM docker-compose** сервисы называются именно `admin` и `public`;
+- имена `admin_api` и `public_api` относятся к **YC Serverless Containers / Terraform**, а не к compose-файлу на VM.
